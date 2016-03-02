@@ -159,7 +159,7 @@ main = hspec $ do
                _ <- app f y
                return [y, z]
             free expr `shouldBe` [y, z] 
-        it "claims [y,z] is free in: (λx.z) y" $ do
+        it "claims [y,z] is free in: y (λx.z)" $ do
             ([y,z], expr) <- buildExpr $ do
                y <- variable "y"
                z <- variable "z"
@@ -167,7 +167,7 @@ main = hspec $ do
                _ <- app y f
                return [y, z]
             free expr `shouldBe` [y, z] 
-        it "claims [y,z] is free in: (λx.z) y" $ do
+        it "claims [x] is free in: x x y" $ do
             (x, expr) <- buildExpr $ do
                x <- variable "x"
                _ <- app x x
