@@ -24,7 +24,7 @@ variable n = do
     node <- newNode
     let lnode = (node, Variable n)
     modify $ insNode lnode
-    return lnode 
+    return lnode
 
 lambda :: Monad m => Name -> ExprNode -> StateT Expr m ExprNode
 lambda x body = do
@@ -35,7 +35,7 @@ lambda x body = do
     modify $ insEdge bodyEdge
 
     expr <- get
-    let toBeBound = filter (\n -> isFree expr n && variableName expr n == x) $ bfs (fst body) expr 
+    let toBeBound = filter (\n -> isFree expr n && variableName expr n == x) $ bfs (fst body) expr
     mapM_ (\n -> modify $ insEdge (n, node, Binding)) toBeBound
 
     return lambdaNode
@@ -68,7 +68,7 @@ variableName :: Expr -> Node -> Name
 variableName expr n = let (Variable name) = lab' $ context expr n in name
 
 isVariable :: Expr -> Node -> Bool
-isVariable expr n = case lab' $ context expr n of 
+isVariable expr n = case lab' $ context expr n of
                       Variable _ -> True
                       _ -> False
 
@@ -80,12 +80,19 @@ isFree expr n = isVariable expr n && case map edgeLabel . out' $ context expr n 
 
 main :: IO ()
 main = hspec $ do
+    describe "variable" $ do
+        it "should create a lone node" $ do
+            ((n, Variable "x"), expr)  <- buildExpr $ variable "x"
+            out expr n `shouldBe` []
+            inn expr n `shouldBe` []
+
     describe "lambda" $ do
         it "should bind x in: λx.x " $ do
-            ([(ln,_), (xn, _)], expr) <- buildExpr $ do
+            ([(ln, Lambda _), (xn, Variable _)], expr) <- buildExpr $ do
                 x <- variable "x"
                 l <- lambda "x" x
                 return [l, x]
+            out expr ln `shouldBe` [(ln, xn, Body)]
             inn expr ln `shouldBe` [(xn, ln, Binding)]
             out expr xn `shouldBe` [(xn, ln, Binding)]
         it "should not bind x in: λy.x " $ do
@@ -93,6 +100,7 @@ main = hspec $ do
                 x <- variable "x"
                 l <- lambda "y" x
                 return [l, x]
+            out expr ln `shouldBe` [(ln, xn, Body)]
             inn expr ln `shouldBe` []
             out expr xn `shouldBe` []
         it "should bind both x in: λx.x x" $ do
@@ -104,7 +112,26 @@ main = hspec $ do
             inn expr ln `shouldBe` [(xn1, ln, Binding), (xn2, ln, Binding)]
             out expr xn1 `shouldBe` [(xn1, ln, Binding)]
             out expr xn2 `shouldBe` [(xn2, ln, Binding)]
-                
+        it "should bind x in: λx.x x" $ do
+            ([(ln,_), (xn1, _), (xn2, _)], expr) <- buildExpr $ do
+                x1 <- variable "x"
+                x2 <- variable "x"
+                l <- lambda "x" =<< app x1 x2
+                return [l, x1, x2]
+            inn expr ln `shouldBe` [(xn1, ln, Binding), (xn2, ln, Binding)]
+            out expr xn1 `shouldBe` [(xn1, ln, Binding)]
+            out expr xn2 `shouldBe` [(xn2, ln, Binding)]
+
+    describe "app" $ do
+        it "should connect the function and argument in: x y" $ do
+            ([(a, App), (x, Variable _), (y, Variable _)], expr) <- buildExpr $ do
+                x <- variable "x"
+                y <- variable "y"
+                a <- app x y
+                return [a, x, y]
+            out expr a `shouldBe` [(a, x, Function), (a, y, Argument)]
+            inn expr a `shouldBe` []
+
     describe "free" $ do
         it "claims x is free in: x" $ do
             (x, expr) <- buildExpr $ variable "x"
@@ -138,19 +165,19 @@ main = hspec $ do
                y <- variable "y"
                _ <- lambda "y" =<< app x y
                return x
-            free expr `shouldBe` [x] 
+            free expr `shouldBe` [x]
         it "claims nothing is free in: λx.λy.x y" $ do
             (_, expr) <- buildExpr $ do
                x <- variable "x"
                y <- variable "y"
                lambda "x" =<< lambda "y" =<< app x y
-            free expr `shouldBe` [] 
+            free expr `shouldBe` []
         it "claims nothing is free in: λx.λy.λz.x y" $ do
             (_, expr) <- buildExpr $ do
                x <- variable "x"
                y <- variable "y"
                lambda "x" =<< lambda "y" =<< lambda "z" =<< app x y
-            free expr `shouldBe` [] 
+            free expr `shouldBe` []
         it "claims [y,z] is free in: (λx.z) y" $ do
             ([y,z], expr) <- buildExpr $ do
                y <- variable "y"
@@ -158,7 +185,7 @@ main = hspec $ do
                f <- lambda "x" z
                _ <- app f y
                return [y, z]
-            free expr `shouldBe` [y, z] 
+            free expr `shouldBe` [y, z]
         it "claims [y,z] is free in: y (λx.z)" $ do
             ([y,z], expr) <- buildExpr $ do
                y <- variable "y"
@@ -166,11 +193,11 @@ main = hspec $ do
                f <- lambda "x" z
                _ <- app y f
                return [y, z]
-            free expr `shouldBe` [y, z] 
+            free expr `shouldBe` [y, z]
         it "claims [x] is free in: x x y" $ do
             (x, expr) <- buildExpr $ do
                x <- variable "x"
                _ <- app x x
                return x
-            free expr `shouldBe` [x] 
+            free expr `shouldBe` [x]
 
