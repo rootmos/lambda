@@ -1,6 +1,6 @@
 module Lamda where
 
-import Test.Hspec
+import Test.Hspec hiding (context)
 import Data.Graph.Inductive
 import Control.Monad.State
 
@@ -30,9 +30,14 @@ lambda :: Monad m => Name -> ExprNode -> StateT Expr m ExprNode
 lambda x body = do
     node <- newNode
     let lambdaNode = (node, Lambda x)
-    let bodyEdge = (fst lambdaNode, fst body, Body)
+    let bodyEdge = (node, fst body, Body)
     modify $ insNode lambdaNode
     modify $ insEdge bodyEdge
+
+    expr <- get
+    let toBeBound = filter (\n -> isFree expr n && variableName expr n == x) $ bfs (fst body) expr 
+    mapM_ (\n -> modify $ insEdge (n, node, Binding)) toBeBound
+
     return lambdaNode
 
 app :: Monad m => ExprNode -> ExprNode -> StateT Expr m ExprNode
@@ -51,13 +56,27 @@ buildExpr :: Monad m => StateT Expr m a -> m (a, Expr)
 buildExpr = flip runStateT empty
 
 free :: Expr -> [ExprNode]
-free expr = labNodes $ labnfilter isFreeVariable expr
+free expr = labNodes $ labnfilter labledIsFreeVariable expr
     where
-        isFreeVariable ln @ (n, _)
-            | isVariable ln = Binding `notElem` map edgeLabel (out expr n)
+        labledIsFreeVariable ln @ (n, _)
+            | labledIsVariable ln = Binding `notElem` map edgeLabel (out expr n)
             | otherwise = False
-        isVariable (n, Variable _) = True
-        isVariable _ = False
+        labledIsVariable (_, Variable _) = True
+        labledIsVariable _ = False
+
+variableName :: Expr -> Node -> Name
+variableName expr n = let (Variable name) = lab' $ context expr n in name
+
+isVariable :: Expr -> Node -> Bool
+isVariable expr n = case lab' $ context expr n of 
+                      Variable _ -> True
+                      _ -> False
+
+isFree :: Expr -> Node -> Bool
+isFree expr n = isVariable expr n && case map edgeLabel . out' $ context expr n of
+                                       [Binding] -> False
+                                       [] -> True
+                                       _ -> error "Invariant violated!"
 
 main :: IO ()
 main = hspec $ do
@@ -67,15 +86,24 @@ main = hspec $ do
                 x <- variable "x"
                 l <- lambda "x" x
                 return [l, x]
-            indeg expr ln `shouldBe` 1
-            outdeg expr xn `shouldBe` 1
+            inn expr ln `shouldBe` [(xn, ln, Binding)]
+            out expr xn `shouldBe` [(xn, ln, Binding)]
         it "should not bind x in: λy.x " $ do
             ([(ln,_), (xn, _)], expr) <- buildExpr $ do
                 x <- variable "x"
                 l <- lambda "y" x
                 return [l, x]
-            indeg expr ln `shouldBe` 0
-            outdeg expr xn `shouldBe` 0
+            inn expr ln `shouldBe` []
+            out expr xn `shouldBe` []
+        it "should bind both x in: λx.x x" $ do
+            ([(ln,_), (xn1, _), (xn2, _)], expr) <- buildExpr $ do
+                x1 <- variable "x"
+                x2 <- variable "x"
+                l <- lambda "x" =<< app x1 x2
+                return [l, x1, x2]
+            inn expr ln `shouldBe` [(xn1, ln, Binding), (xn2, ln, Binding)]
+            out expr xn1 `shouldBe` [(xn1, ln, Binding)]
+            out expr xn2 `shouldBe` [(xn2, ln, Binding)]
                 
     describe "free" $ do
         it "claims x is free in: x" $ do
