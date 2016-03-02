@@ -1,9 +1,7 @@
 module Lamda where
 
 import Test.Hspec
-import Data.List
 import Data.Graph.Inductive
-import Data.Graph.Inductive.PatriciaTree
 import Control.Monad.State
 
 type Name = String
@@ -11,18 +9,8 @@ type Name = String
 data AST = V Name | L Name AST | A AST AST
     deriving Show
 
-free :: AST -> [Name]
-free (V v) = [v]
-free (L v expr) = delete v $ free expr
-free (A m n) = sort . nub $ free m ++ free n
 
-alphaEquivalent :: AST -> AST -> Bool
-alphaEquivalent (V _) (V _) = True
-alphaEquivalent (L x e) (L y f) = (x `elem` free e) == (y `elem` free f) && e `alphaEquivalent` f
-alphaEquivalent _ _ = False
-
-
-data NodeLabel = Let Name | Variable Name | Lambda Name | App
+data NodeLabel = Variable Name | Lambda Name | App
     deriving (Show, Eq)
 data EdgeLabel = Binding | Body | Function | Argument
     deriving (Show, Eq)
@@ -31,53 +19,130 @@ type Expr = Gr NodeLabel EdgeLabel
 type ExprNode = LNode NodeLabel
 type ExprEdge = LEdge EdgeLabel
 
-variable :: Name -> State Expr ExprNode
+variable :: Monad m => Name -> StateT Expr m ExprNode
 variable n = do
-    node <- get >>= return . head . newNodes 1
+    node <- newNode
     let lnode = (node, Variable n)
     modify $ insNode lnode
     return lnode 
 
-lambda :: Name -> ExprNode -> State Expr ExprNode
+lambda :: Monad m => Name -> ExprNode -> StateT Expr m ExprNode
 lambda x body = do
-    node <- get >>= return . head . newNodes 1
+    node <- newNode
     let lambdaNode = (node, Lambda x)
     let bodyEdge = (fst lambdaNode, fst body, Body)
     modify $ insNode lambdaNode
     modify $ insEdge bodyEdge
     return lambdaNode
 
-foo = execState (variable "x" >>= lambda "y") empty
+app :: Monad m => ExprNode -> ExprNode -> StateT Expr m ExprNode
+app fun arg = do
+    node <- newNode
+    let appNode = (node, App)
+    modify $ insNode appNode
+    modify $ insEdge (fst appNode, fst fun, Function)
+    modify $ insEdge (fst appNode, fst arg, Argument)
+    return appNode
+
+newNode :: Monad m => StateT Expr m Node
+newNode = get >>= return . head . newNodes 1
+
+buildExpr :: Monad m => StateT Expr m a -> m (a, Expr)
+buildExpr = flip runStateT empty
+
+free :: Expr -> [ExprNode]
+free expr = labNodes $ labnfilter isFreeVariable expr
+    where
+        isFreeVariable ln @ (n, _)
+            | isVariable ln = Binding `notElem` map edgeLabel (out expr n)
+            | otherwise = False
+        isVariable (n, Variable _) = True
+        isVariable _ = False
 
 main :: IO ()
 main = hspec $ do
+    describe "lambda" $ do
+        it "should bind x in: λx.x " $ do
+            ([(ln,_), (xn, _)], expr) <- buildExpr $ do
+                x <- variable "x"
+                l <- lambda "x" x
+                return [l, x]
+            indeg expr ln `shouldBe` 1
+            outdeg expr xn `shouldBe` 1
+        it "should not bind x in: λy.x " $ do
+            ([(ln,_), (xn, _)], expr) <- buildExpr $ do
+                x <- variable "x"
+                l <- lambda "y" x
+                return [l, x]
+            indeg expr ln `shouldBe` 0
+            outdeg expr xn `shouldBe` 0
+                
     describe "free" $ do
-        it "returns [x] for x" $ do
-            free (V "x") `shouldBe` ["x"]
-        it "returns [] for L x x" $ do
-            free (L "x" (V "x")) `shouldBe` []
-        it "returns [y] for L x y" $ do
-            free (L "x" (V "y")) `shouldBe` ["y"]
-        it "returns [x,y] for A x y" $ do
-            free (A (V "x") (V "y")) `shouldBe` ["x", "y"]
-        it "returns [y] for L x (A x y)" $ do
-            free (L "x" (A (V "x") (V "y"))) `shouldBe` ["y"]
-        it "returns [x] for L y (A x y)" $ do
-            free (L "y" (A (V "x") (V "y"))) `shouldBe` ["x"]
-        it "returns [y,z] for A (L x z) y" $ do
-            free (A (L "x" (V "z")) (V "y")) `shouldBe` ["y","z"]
-        it "returns [y,z] for A y (L x z)" $ do
-            free (A (V "y") (L "x" (V "z"))) `shouldBe` ["y","z"]
-        it "returns [x] for A x x" $ do
-            free (A (V "x") (V "x")) `shouldBe` ["x"]
-    describe "alphaEquivalent" $ do
-        it "claims that x is alpha-equivalent to y" $ do
-            (V "x") `alphaEquivalent` (V "y") `shouldBe` True
-        it "claims that λx.x is alpha-equivalent to λy.y" $ do
-            (L "x" (V "x")) `alphaEquivalent` (L "y" (V "y")) `shouldBe` True
-        it "claims that λx.λx.x is not alpha-equivalent to λy.λx.y" $ do
-            (L "x" (L "x" (V "x"))) `alphaEquivalent` (L "y" (L "x" (V "y"))) `shouldBe` False
-        it "claims that λx.λx.x is alpha-equivalent to λy.λx.x" $ do
-            (L "x" (L "x" (V "x"))) `alphaEquivalent` (L "y" (L "x" (V "x"))) `shouldBe` True
-        it "claims that λx.x y is not alpha equivalent to λx.x" $ do
-            (L "x" (A (V "x") (V "y"))) `alphaEquivalent` (L "x" (V "x")) `shouldBe` False
+        it "claims x is free in: x" $ do
+            (x, expr) <- buildExpr $ variable "x"
+            free expr `shouldBe` [x]
+        it "claims nothing is free in: λx.x" $ do
+            (_, expr) <- buildExpr $ lambda "x" =<< variable "x"
+            free expr `shouldBe` []
+        it "claims [y] is free in: λx.y" $ do
+            (y, expr) <- buildExpr $ do
+               y <- variable "y"
+               _ <- lambda "x" y
+               return y
+            free expr `shouldBe` [y]
+        it "claims [x, y] is free in: x y" $ do
+            ([x,y], expr) <- buildExpr $ do
+               x <- variable "x"
+               y <- variable "y"
+               _ <- app x y
+               return [x, y]
+            free expr `shouldBe` [x, y]
+        it "claims [y] is free in: λx.x y" $ do
+            (y, expr) <- buildExpr $ do
+               x <- variable "x"
+               y <- variable "y"
+               _ <- lambda "x" =<< app x y
+               return y
+            free expr `shouldBe` [y]
+        it "claims [x] is free in: λy.x y" $ do
+            (x, expr) <- buildExpr $ do
+               x <- variable "x"
+               y <- variable "y"
+               _ <- lambda "y" =<< app x y
+               return x
+            free expr `shouldBe` [x] 
+        it "claims nothing is free in: λx.λy.x y" $ do
+            (_, expr) <- buildExpr $ do
+               x <- variable "x"
+               y <- variable "y"
+               lambda "x" =<< lambda "y" =<< app x y
+            free expr `shouldBe` [] 
+        it "claims nothing is free in: λx.λy.λz.x y" $ do
+            (_, expr) <- buildExpr $ do
+               x <- variable "x"
+               y <- variable "y"
+               lambda "x" =<< lambda "y" =<< lambda "z" =<< app x y
+            free expr `shouldBe` [] 
+        it "claims [y,z] is free in: (λx.z) y" $ do
+            ([y,z], expr) <- buildExpr $ do
+               y <- variable "y"
+               z <- variable "z"
+               f <- lambda "x" z
+               _ <- app f y
+               return [y, z]
+            free expr `shouldBe` [y, z] 
+        it "claims [y,z] is free in: (λx.z) y" $ do
+            ([y,z], expr) <- buildExpr $ do
+               y <- variable "y"
+               z <- variable "z"
+               f <- lambda "x" z
+               _ <- app y f
+               return [y, z]
+            free expr `shouldBe` [y, z] 
+        it "claims [y,z] is free in: (λx.z) y" $ do
+            (x, expr) <- buildExpr $ do
+               x <- variable "x"
+               _ <- app x x
+               return x
+            free expr `shouldBe` [x] 
+
