@@ -19,14 +19,16 @@ type Expr = Gr NodeLabel EdgeLabel
 type ExprNode = LNode NodeLabel
 type ExprEdge = LEdge EdgeLabel
 
-variable :: Monad m => Name -> StateT Expr m ExprNode
+type ExprT m a = StateT Expr m a
+
+variable :: Monad m => Name -> ExprT m ExprNode
 variable n = do
     node <- newNode
     let lnode = (node, Variable n)
     modify $ insNode lnode
     return lnode
 
-lambda :: Monad m => Name -> ExprNode -> StateT Expr m ExprNode
+lambda :: Monad m => Name -> ExprNode -> ExprT m ExprNode
 lambda x body = do
     node <- newNode
     let lambdaNode = (node, Lambda x)
@@ -40,7 +42,7 @@ lambda x body = do
 
     return lambdaNode
 
-app :: Monad m => ExprNode -> ExprNode -> StateT Expr m ExprNode
+app :: Monad m => ExprNode -> ExprNode -> ExprT m ExprNode
 app fun arg = do
     node <- newNode
     let appNode = (node, App)
@@ -49,11 +51,14 @@ app fun arg = do
     modify $ insEdge (fst appNode, fst arg, Argument)
     return appNode
 
-newNode :: Monad m => StateT Expr m Node
+newNode :: Monad m => ExprT m Node
 newNode = get >>= return . head . newNodes 1
 
-buildExpr :: Monad m => StateT Expr m a -> m (a, Expr)
-buildExpr = flip runStateT empty
+buildExprT :: Monad m => ExprT m a -> m (a, Expr)
+buildExprT = flip runStateT empty
+
+runExprT :: Monad m => ExprT m a -> m a
+runExprT = flip evalStateT empty
 
 free :: Expr -> [ExprNode]
 free expr = labNodes $ labnfilter labledIsFreeVariable expr
@@ -81,123 +86,114 @@ isFree expr n = isVariable expr n && case map edgeLabel . out' $ context expr n 
 main :: IO ()
 main = hspec $ do
     describe "variable" $ do
-        it "should create a lone node" $ do
-            ((n, Variable "x"), expr)  <- buildExpr $ variable "x"
-            out expr n `shouldBe` []
-            inn expr n `shouldBe` []
+        it "should create a lone node" $ runExprT $ do
+            (n, Variable "x") <- variable "x"
+            expr <- get
+            lift $ out expr n `shouldBe` []
+            lift $ inn expr n `shouldBe` []
 
     describe "lambda" $ do
-        it "should bind x in: λx.x " $ do
-            ([(ln, Lambda _), (xn, Variable _)], expr) <- buildExpr $ do
-                x <- variable "x"
-                l <- lambda "x" x
-                return [l, x]
-            out expr ln `shouldBe` [(ln, xn, Body)]
-            inn expr ln `shouldBe` [(xn, ln, Binding)]
-            out expr xn `shouldBe` [(xn, ln, Binding)]
-        it "should not bind x in: λy.x " $ do
-            ([(ln,_), (xn, _)], expr) <- buildExpr $ do
-                x <- variable "x"
-                l <- lambda "y" x
-                return [l, x]
-            out expr ln `shouldBe` [(ln, xn, Body)]
-            inn expr ln `shouldBe` []
-            out expr xn `shouldBe` []
-        it "should bind both x in: λx.x x" $ do
-            ([(ln,_), (xn1, _), (xn2, _)], expr) <- buildExpr $ do
-                x1 <- variable "x"
-                x2 <- variable "x"
-                l <- lambda "x" =<< app x1 x2
-                return [l, x1, x2]
-            inn expr ln `shouldBe` [(xn1, ln, Binding), (xn2, ln, Binding)]
-            out expr xn1 `shouldBe` [(xn1, ln, Binding)]
-            out expr xn2 `shouldBe` [(xn2, ln, Binding)]
-        it "should bind x in: λx.x x" $ do
-            ([(ln,_), (xn1, _), (xn2, _)], expr) <- buildExpr $ do
-                x1 <- variable "x"
-                x2 <- variable "x"
-                l <- lambda "x" =<< app x1 x2
-                return [l, x1, x2]
-            inn expr ln `shouldBe` [(xn1, ln, Binding), (xn2, ln, Binding)]
-            out expr xn1 `shouldBe` [(xn1, ln, Binding)]
-            out expr xn2 `shouldBe` [(xn2, ln, Binding)]
+        it "should bind x in: λx.x " $ runExprT $ do
+            x@(xn, Variable _) <- variable "x"
+            (ln, Lambda _) <- lambda "x" x
+            expr <- get
+            lift $ out expr ln `shouldBe` [(ln, xn, Body)]
+            lift $ inn expr ln `shouldBe` [(xn, ln, Binding)]
+            lift $ out expr xn `shouldBe` [(xn, ln, Binding)]
+        it "should not bind x in: λy.x " $ runExprT $ do
+            x@(xn, _) <- variable "x"
+            (ln, _) <- lambda "y" x
+            expr <- get
+            lift $ out expr ln `shouldBe` [(ln, xn, Body)]
+            lift $ inn expr ln `shouldBe` []
+            lift $ out expr xn `shouldBe` []
+        it "should bind both x in: λx.x x" $ runExprT $ do
+            x1@(xn1, _) <- variable "x"
+            x2@(xn2, _) <- variable "x"
+            (ln, _) <- lambda "x" =<< app x1 x2
+            expr <- get
+            lift $ inn expr ln `shouldBe` [(xn1, ln, Binding), (xn2, ln, Binding)]
+            lift $ out expr xn1 `shouldBe` [(xn1, ln, Binding)]
+            lift $ out expr xn2 `shouldBe` [(xn2, ln, Binding)]
+        it "should bind x in: λx.x x" $ runExprT $ do
+            x1@(xn1,_) <- variable "x"
+            x2@(xn2, _) <- variable "x"
+            (ln, _) <- lambda "x" =<< app x1 x2
+            expr <- get
+            lift $ inn expr ln `shouldBe` [(xn1, ln, Binding), (xn2, ln, Binding)]
+            lift $ out expr xn1 `shouldBe` [(xn1, ln, Binding)]
+            lift $ out expr xn2 `shouldBe` [(xn2, ln, Binding)]
 
     describe "app" $ do
-        it "should connect the function and argument in: x y" $ do
-            ([(a, App), (x, Variable _), (y, Variable _)], expr) <- buildExpr $ do
-                x <- variable "x"
-                y <- variable "y"
-                a <- app x y
-                return [a, x, y]
-            out expr a `shouldBe` [(a, x, Function), (a, y, Argument)]
-            inn expr a `shouldBe` []
+        it "should connect the function and argument in: x y" $ runExprT $ do
+            x@(xn, Variable _) <- variable "x"
+            y@(yn, Variable _) <- variable "y"
+            (a, App) <- app x y
+            expr <- get
+            lift $ out expr a `shouldBe` [(a, xn, Function), (a, yn, Argument)]
+            lift $ inn expr a `shouldBe` []
 
     describe "free" $ do
-        it "claims x is free in: x" $ do
-            (x, expr) <- buildExpr $ variable "x"
-            free expr `shouldBe` [x]
-        it "claims nothing is free in: λx.x" $ do
-            (_, expr) <- buildExpr $ lambda "x" =<< variable "x"
-            free expr `shouldBe` []
-        it "claims [y] is free in: λx.y" $ do
-            (y, expr) <- buildExpr $ do
-               y <- variable "y"
-               _ <- lambda "x" y
-               return y
-            free expr `shouldBe` [y]
-        it "claims [x, y] is free in: x y" $ do
-            ([x,y], expr) <- buildExpr $ do
-               x <- variable "x"
-               y <- variable "y"
-               _ <- app x y
-               return [x, y]
-            free expr `shouldBe` [x, y]
-        it "claims [y] is free in: λx.x y" $ do
-            (y, expr) <- buildExpr $ do
-               x <- variable "x"
-               y <- variable "y"
-               _ <- lambda "x" =<< app x y
-               return y
-            free expr `shouldBe` [y]
-        it "claims [x] is free in: λy.x y" $ do
-            (x, expr) <- buildExpr $ do
-               x <- variable "x"
-               y <- variable "y"
-               _ <- lambda "y" =<< app x y
-               return x
-            free expr `shouldBe` [x]
-        it "claims nothing is free in: λx.λy.x y" $ do
-            (_, expr) <- buildExpr $ do
-               x <- variable "x"
-               y <- variable "y"
-               lambda "x" =<< lambda "y" =<< app x y
-            free expr `shouldBe` []
-        it "claims nothing is free in: λx.λy.λz.x y" $ do
-            (_, expr) <- buildExpr $ do
-               x <- variable "x"
-               y <- variable "y"
-               lambda "x" =<< lambda "y" =<< lambda "z" =<< app x y
-            free expr `shouldBe` []
-        it "claims [y,z] is free in: (λx.z) y" $ do
-            ([y,z], expr) <- buildExpr $ do
-               y <- variable "y"
-               z <- variable "z"
-               f <- lambda "x" z
-               _ <- app f y
-               return [y, z]
-            free expr `shouldBe` [y, z]
-        it "claims [y,z] is free in: y (λx.z)" $ do
-            ([y,z], expr) <- buildExpr $ do
-               y <- variable "y"
-               z <- variable "z"
-               f <- lambda "x" z
-               _ <- app y f
-               return [y, z]
-            free expr `shouldBe` [y, z]
-        it "claims [x] is free in: x x y" $ do
-            (x, expr) <- buildExpr $ do
-               x <- variable "x"
-               _ <- app x x
-               return x
-            free expr `shouldBe` [x]
+        it "claims x is free in: x" $ runExprT $ do
+            x <- variable "x"
+            expr <- get
+            lift $ free expr `shouldBe` [x]
+        it "claims nothing is free in: λx.x" $ runExprT $ do
+            _ <- lambda "x" =<< variable "x"
+            expr <- get
+            lift $ free expr `shouldBe` []
+        it "claims [y] is free in: λx.y" $ runExprT $ do
+            y <- variable "y"
+            _ <- lambda "x" y
+            expr <- get
+            lift $ free expr `shouldBe` [y]
+        it "claims [x, y] is free in: x y" $ runExprT $ do
+            x <- variable "x"
+            y <- variable "y"
+            _ <- app x y
+            expr <- get
+            lift $ free expr `shouldBe` [x, y]
+        it "claims [y] is free in: λx.x y" $ runExprT $ do
+            x <- variable "x"
+            y <- variable "y"
+            _ <- lambda "x" =<< app x y
+            expr <- get
+            lift $ free expr `shouldBe` [y]
+        it "claims [x] is free in: λy.x y" $ runExprT $ do
+            x <- variable "x"
+            y <- variable "y"
+            _ <- lambda "y" =<< app x y
+            expr <- get
+            lift $ free expr `shouldBe` [x]
+        it "claims nothing is free in: λx.λy.x y" $ runExprT $ do
+            x <- variable "x"
+            y <- variable "y"
+            _ <- lambda "x" =<< lambda "y" =<< app x y
+            expr <- get
+            lift $ free expr `shouldBe` []
+        it "claims nothing is free in: λx.λy.λz.x y" $ runExprT $ do
+            x <- variable "x"
+            y <- variable "y"
+            _ <- lambda "x" =<< lambda "y" =<< lambda "z" =<< app x y
+            expr <- get
+            lift $ free expr `shouldBe` []
+        it "claims [y,z] is free in: (λx.z) y" $ runExprT $ do
+            y <- variable "y"
+            z <- variable "z"
+            f <- lambda "x" z
+            _ <- app f y
+            expr <- get
+            lift $ free expr `shouldBe` [y, z]
+        it "claims [y,z] is free in: y (λx.z)" $ runExprT $ do
+            y <- variable "y"
+            z <- variable "z"
+            f <- lambda "x" z
+            _ <- app y f
+            expr <- get
+            lift $ free expr `shouldBe` [y, z]
+        it "claims [x] is free in: x x y" $ runExprT $ do
+            x <- variable "x"
+            _ <- app x x
+            expr <- get
+            lift $ free expr `shouldBe` [x]
 
