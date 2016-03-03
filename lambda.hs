@@ -29,15 +29,15 @@ variable n = do
     return lnode
 
 lambda :: Monad m => Name -> ExprNode -> ExprT m ExprNode
-lambda x body = do
+lambda x (b, _) = do
     node <- newNode
     let lambdaNode = (node, Lambda x)
-    let bodyEdge = (node, fst body, Body)
+    let bodyEdge = (node, b, Body)
     modify $ insNode lambdaNode
     modify $ insEdge bodyEdge
 
     expr <- get
-    let toBeBound = filter (\n -> isFree expr n && variableName expr n == x) $ bfs (fst body) expr
+    let toBeBound = filter (\n -> isFree expr n && variableName expr n == x) $ bfs b expr
     mapM_ (\n -> modify $ insEdge (n, node, Binding)) toBeBound
 
     return lambdaNode
@@ -70,7 +70,8 @@ free expr = labNodes $ labnfilter labledIsFreeVariable expr
         labledIsVariable _ = False
 
 variableName :: Expr -> Node -> Name
-variableName expr n = let (Variable name) = lab' $ context expr n in name
+variableName expr n = let (Variable name) = lab' $ context expr n
+                       in name
 
 isVariable :: Expr -> Node -> Bool
 isVariable expr n = case lab' $ context expr n of
@@ -82,6 +83,15 @@ isFree expr n = isVariable expr n && case map edgeLabel . out' $ context expr n 
                                        [Binding] -> False
                                        [] -> True
                                        _ -> error "Invariant violated!"
+
+body :: Expr -> Node -> ExprNode
+body expr node = let [(_, b, Body)] = out expr node
+                  in labNode' $ context expr b
+
+alphaEquivalent :: (ExprNode, Expr) -> (ExprNode, Expr) -> Bool
+((n1, Variable _), expr1) `alphaEquivalent` ((n2, Variable _), expr2) = isFree expr1 n1 == isFree expr2 n2
+((n1, Lambda _), expr1) `alphaEquivalent` ((n2, Lambda _), expr2) = (body expr1 n1, expr1) `alphaEquivalent` (body expr2 n2, expr2)
+(_, _) `alphaEquivalent` (_, _) = False
 
 main :: IO ()
 main = hspec $ do
@@ -197,3 +207,41 @@ main = hspec $ do
             expr <- get
             lift $ free expr `shouldBe` [x]
 
+    describe "alphaEquivalent" $ do
+        it "claims x and y are alpha-equivalent" $ do
+            expr1 <- buildExprT $ variable "x"
+            expr2 <- buildExprT $ variable "y"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` True
+        it "claims λx.x and y are not alpha-equivalent" $ do
+            expr1 <- buildExprT $ lambda "x" =<< variable "x"
+            expr2 <- buildExprT $ variable "y"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        it "claims x y and z are not alpha-equivalent" $ do
+            expr1 <- buildExprT $ do
+               x <- variable "x"
+               y <- variable "y"
+               app x y
+            expr2 <- buildExprT $ variable "z"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        it "claims λx.x and λy.y are alpha-equivalent" $ do
+            expr1 <- buildExprT $ lambda "x" =<< variable "x"
+            expr2 <- buildExprT $ lambda "y" =<< variable "y"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` True
+        it "claims λx.y and λz.z are not alpha-equivalent" $ do
+            expr1 <- buildExprT $ lambda "x" =<< variable "y"
+            expr2 <- buildExprT $ lambda "z" =<< variable "z"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
+
+        -- Examples from: https://en.wikipedia.org/wiki/Lambda_calculus#.CE.B1-conversion
+        it "claims λx.λx.x and λy.λx.x are alpha-equivalent" $ do
+            expr1 <- buildExprT $ lambda "x" =<< lambda "x" =<< variable "x"
+            expr2 <- buildExprT $ lambda "y" =<< lambda "x" =<< variable "x"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` True
+        it "claims λx.λx.x and λy.λx.y are not alpha-equivalent" $ do
+            expr1 <- buildExprT $ lambda "x" =<< lambda "x" =<< variable "x"
+            expr2 <- buildExprT $ lambda "y" =<< lambda "x" =<< variable "y"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        it "claims λx.λy.x and λy.λy.y are not alpha-equivalent" $ do
+            expr1 <- buildExprT $ lambda "x" =<< lambda "y" =<< variable "x"
+            expr2 <- buildExprT $ lambda "y" =<< lambda "y" =<< variable "y"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
