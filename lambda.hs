@@ -3,6 +3,7 @@ module Lamda where
 import Test.Hspec hiding (context)
 import Data.Graph.Inductive
 import Control.Monad.State
+import Debug.Trace
 
 type Name = String
 
@@ -82,19 +83,97 @@ isFree :: Expr -> Node -> Bool
 isFree expr n = isVariable expr n && case map edgeLabel . out' $ context expr n of
                                        [Binding] -> False
                                        [] -> True
-                                       _ -> error "Invariant violated!"
+                                       _ -> error "Invariant violated: non-binding edge out from variable, or too many outgoing edges from variable"
 
 body :: Expr -> Node -> ExprNode
 body expr node = let [(_, b, Body)] = out expr node
                   in labNode' $ context expr b
 
+argument :: Expr -> Node -> ExprNode
+argument expr node = let [(_, a, Argument)] = filter (\(_, _, t) -> t == Argument) $ out expr node
+                      in labNode' $ context expr a
+
+function :: Expr -> Node -> ExprNode
+function expr node = let [(_, f, Function)] = filter (\(_, _, t) -> t == Function) $ out expr node
+                      in labNode' $ context expr f
+
+parent :: Expr -> Node -> Maybe (Node, EdgeLabel)
+parent expr node = case filter relevantEdge $ inn expr node of
+                     [] -> Nothing
+                     [(i, _, t)] -> Just (i, t)
+                     _ -> error "Invariant violated: more than one parent"
+                    where
+                        relevantEdge (_, _, Body) = True
+                        relevantEdge (_, _, Function) = True
+                        relevantEdge (_, _, Argument) = True
+                        relevantEdge _ = False
+
+parents :: Expr -> Node -> [(Node, EdgeLabel)]
+parents expr node = case parent expr node of
+                      Just p@(parentNode, _) -> p : parents expr parentNode
+                      Nothing -> []
+
 alphaEquivalent :: (ExprNode, Expr) -> (ExprNode, Expr) -> Bool
-((n1, Variable _), expr1) `alphaEquivalent` ((n2, Variable _), expr2) = isFree expr1 n1 == isFree expr2 n2
-((n1, Lambda _), expr1) `alphaEquivalent` ((n2, Lambda _), expr2) = (body expr1 n1, expr1) `alphaEquivalent` (body expr2 n2, expr2)
+((n1, Variable _), expr1) `alphaEquivalent` ((n2, Variable _), expr2)
+    | isFree expr1 n1 = isFree expr2 n2
+    | isFree expr2 n2 = isFree expr1 n1
+    | otherwise = bindingPath expr1 n1 == bindingPath expr2 n2
+        where
+            bindingPath expr n = pathTypes $ takeWhile (\(m, _) -> m /= bindingNode expr n) $ parents expr n
+            pathTypes = map snd
+            bindingNode expr n = let [(_, ln, Binding)] = out expr n in ln
+
+((n1, Lambda _), expr1) `alphaEquivalent` ((n2, Lambda _), expr2) =
+    (body expr1 n1, expr1) `alphaEquivalent` (body expr2 n2, expr2)
+
+((n1, App), expr1) `alphaEquivalent` ((n2, App), expr2) =
+    (function expr1 n1, expr1) `alphaEquivalent` (function expr2 n2, expr2)
+    && (argument expr1 n1, expr1) `alphaEquivalent` (argument expr2 n2, expr2)
+
 (_, _) `alphaEquivalent` (_, _) = False
+
 
 main :: IO ()
 main = hspec $ do
+    describe "parent" $ do
+        it "should return Nothing for orphans" $ runExprT $ do
+            (x, _) <- variable "x"
+            expr <- get
+            lift $ parent expr x `shouldBe` Nothing
+        it "should return Just (l, Body) for x in: λy.x" $ runExprT $ do
+            x@(xn, _) <- variable "x"
+            (l, _) <- lambda "y" x
+            expr <- get
+            lift $ parent expr xn `shouldBe` Just (l, Body)
+        it "should return Just (a, Function) for x in: x y" $ runExprT $ do
+            x@(xn, _) <- variable "x"
+            y <- variable "y"
+            (a, _) <- app x y
+            expr <- get
+            lift $ parent expr xn `shouldBe` Just (a, Function)
+        it "should return Just (a, Argument) for x in: y x" $ runExprT $ do
+            x@(xn, _) <- variable "x"
+            y <- variable "y"
+            (a, _) <- app y x
+            expr <- get
+            lift $ parent expr xn `shouldBe` Just (a, Argument)
+
+    describe "parents" $ do
+        it "should return [] for orphans" $ runExprT $ do
+            (x, _) <- variable "x"
+            expr <- get
+            lift $ parents expr x `shouldBe` []
+        it "should return [(a2, Argument), (a1, Function), (l, Body)] for x in: λu.(v x) w" $ runExprT $ do
+            x@(xn, _) <- variable "x"
+            v <- variable "v"
+            w <- variable "w"
+            a2@(an2, _) <- app v x
+            a1@(an1, _) <- app a2 w
+            (l, _) <- lambda "u" a1
+            expr <- get
+            lift $ parents expr xn `shouldBe` [(an2, Argument), (an1, Function), (l, Body)]
+
+
     describe "variable" $ do
         it "should create a lone node" $ runExprT $ do
             (n, Variable "x") <- variable "x"
@@ -223,6 +302,25 @@ main = hspec $ do
                app x y
             expr2 <- buildExprT $ variable "z"
             (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        it "claims x y and u v are alpha-equivalent" $ do
+            expr1 <- buildExprT $ do
+               x <- variable "x"
+               y <- variable "y"
+               app x y
+            expr2 <- buildExprT $ do
+               u <- variable "u"
+               v <- variable "v"
+               app u v
+            (expr1 `alphaEquivalent` expr2) `shouldBe` True
+        it "claims x y and u u are not alpha-equivalent (CHECK)" $ do
+            expr1 <- buildExprT $ do
+               x <- variable "x"
+               y <- variable "y"
+               app x y
+            expr2 <- buildExprT $ do
+               u <- variable "u"
+               app u u
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
         it "claims λx.x and λy.y are alpha-equivalent" $ do
             expr1 <- buildExprT $ lambda "x" =<< variable "x"
             expr2 <- buildExprT $ lambda "y" =<< variable "y"
@@ -244,4 +342,26 @@ main = hspec $ do
         it "claims λx.λy.x and λy.λy.y are not alpha-equivalent" $ do
             expr1 <- buildExprT $ lambda "x" =<< lambda "y" =<< variable "x"
             expr2 <- buildExprT $ lambda "y" =<< lambda "y" =<< variable "y"
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
+
+        it "claims λx.y x and λx.x y are not alpha-equivalent (CHECK)" $ do
+            expr1 <- buildExprT $ do
+               x <- variable "x"
+               y <- variable "y"
+               lambda "x" =<< app x y
+            expr2 <- buildExprT $ do
+               x <- variable "x"
+               y <- variable "y"
+               lambda "x" =<< app y x
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        
+        it "claims λy.λx.y x and λy.λx.x y are not alpha-equivalent (CHECK)" $ do
+            expr1 <- buildExprT $ do
+               x <- variable "x"
+               y <- variable "y"
+               lambda "y" =<< lambda "x" =<< app x y
+            expr2 <- buildExprT $ do
+               x <- variable "x"
+               y <- variable "y"
+               lambda "y" =<< lambda "x" =<< app y x
             (expr1 `alphaEquivalent` expr2) `shouldBe` False
