@@ -115,12 +115,11 @@ parents expr node = case parent expr node of
 
 alphaEquivalent :: (ExprNode, Expr) -> (ExprNode, Expr) -> Bool
 ((n1, Variable _), expr1) `alphaEquivalent` ((n2, Variable _), expr2)
-    | isFree expr1 n1 = isFree expr2 n2
-    | isFree expr2 n2 = isFree expr1 n1
+    | isFree expr1 n1 = False
+    | isFree expr2 n2 = False
     | otherwise = bindingHeight expr1 n1 == bindingHeight expr2 n2
         where
             bindingHeight expr n = length $ takeWhile (\(m, _) -> m /= bindingNode expr n) $ parents expr n
-            pathTypes = map snd
             bindingNode expr n = let [(_, ln, Binding)] = out expr n in ln
 
 ((n1, Lambda _), expr1) `alphaEquivalent` ((n2, Lambda _), expr2) =
@@ -287,10 +286,10 @@ main = hspec $ do
             lift $ free expr `shouldBe` [x]
 
     describe "alphaEquivalent" $ do
-        it "claims x and y are alpha-equivalent" $ do
+        it "claims x and y are not alpha-equivalent" $ do
             expr1 <- buildExprT $ variable "x"
             expr2 <- buildExprT $ variable "y"
-            (expr1 `alphaEquivalent` expr2) `shouldBe` True
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
         it "claims λx.x and y are not alpha-equivalent" $ do
             expr1 <- buildExprT $ lambda "x" =<< variable "x"
             expr2 <- buildExprT $ variable "y"
@@ -302,7 +301,7 @@ main = hspec $ do
                app x y
             expr2 <- buildExprT $ variable "z"
             (expr1 `alphaEquivalent` expr2) `shouldBe` False
-        it "claims x y and u v are alpha-equivalent" $ do
+        it "claims x y and u v are not alpha-equivalent" $ do
             expr1 <- buildExprT $ do
                x <- variable "x"
                y <- variable "y"
@@ -311,15 +310,16 @@ main = hspec $ do
                u <- variable "u"
                v <- variable "v"
                app u v
-            (expr1 `alphaEquivalent` expr2) `shouldBe` True
-        it "claims x y and u u are not alpha-equivalent (CHECK)" $ do
+            (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        it "claims λx.λy.x y and λu.λu.u u are not alpha-equivalent" $ do
             expr1 <- buildExprT $ do
                x <- variable "x"
                y <- variable "y"
-               app x y
+               lambda "x" =<< lambda "y" =<< app x y
             expr2 <- buildExprT $ do
-               u <- variable "u"
-               app u u
+               u1 <- variable "u"
+               u2 <- variable "u"
+               lambda "u" =<< lambda "u" =<< app u1 u2
             (expr1 `alphaEquivalent` expr2) `shouldBe` False
         it "claims λx.x and λy.y are alpha-equivalent" $ do
             expr1 <- buildExprT $ lambda "x" =<< variable "x"
@@ -344,7 +344,7 @@ main = hspec $ do
             expr2 <- buildExprT $ lambda "y" =<< lambda "y" =<< variable "y"
             (expr1 `alphaEquivalent` expr2) `shouldBe` False
 
-        it "claims λx.y x and λx.x y are not alpha-equivalent (CHECK)" $ do
+        it "claims λx.y x and λx.x y are not alpha-equivalent" $ do
             expr1 <- buildExprT $ do
                x <- variable "x"
                y <- variable "y"
@@ -355,7 +355,7 @@ main = hspec $ do
                lambda "x" =<< app y x
             (expr1 `alphaEquivalent` expr2) `shouldBe` False
         
-        it "claims λy.λx.y x and λy.λx.x y are not alpha-equivalent (CHECK)" $ do
+        it "claims λy.λx.y x and λy.λx.x y are not alpha-equivalent" $ do
             expr1 <- buildExprT $ do
                x <- variable "x"
                y <- variable "y"
