@@ -117,9 +117,9 @@ alphaEquivalent :: (ExprNode, Expr) -> (ExprNode, Expr) -> Bool
 ((n1, Variable _), expr1) `alphaEquivalent` ((n2, Variable _), expr2)
     | isFree expr1 n1 = isFree expr2 n2
     | isFree expr2 n2 = isFree expr1 n1
-    | otherwise = bindingPath expr1 n1 == bindingPath expr2 n2
+    | otherwise = bindingHeight expr1 n1 == bindingHeight expr2 n2
         where
-            bindingPath expr n = pathTypes $ takeWhile (\(m, _) -> m /= bindingNode expr n) $ parents expr n
+            bindingHeight expr n = length $ takeWhile (\(m, _) -> m /= bindingNode expr n) $ parents expr n
             pathTypes = map snd
             bindingNode expr n = let [(_, ln, Binding)] = out expr n in ln
 
