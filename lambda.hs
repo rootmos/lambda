@@ -4,6 +4,7 @@ module Lamda where
 import Test.Hspec hiding (context)
 import Test.QuickCheck
 import Data.Graph.Inductive
+import Control.Monad.Identity
 import Control.Monad.State
 import Debug.Trace
 
@@ -27,21 +28,21 @@ newtype ProgramT m a = ProgramT {unProgramT :: StateT Program m a}
 
 data Expr = Expr { exprNode :: ProgramNode, exprProgram :: Program }
 
-instance Arbitrary (ProgramT Gen ProgramNode) where
+instance Monad m => Arbitrary (ProgramT m ProgramNode) where
     arbitrary = genProgram =<< (liftM getPositive $ arbitrary)
         where
-            genProgram :: Int -> Gen (ProgramT Gen ProgramNode)
+            genProgram :: Monad m => Int -> Gen (ProgramT m ProgramNode)
             genProgram l
                 | l > 0 = oneof [genVariable, genLambda (l - 1), genApp (l - 1)]
                 | otherwise = genVariable
-            genVariable :: Gen (ProgramT Gen ProgramNode)
-            genVariable = return $ variable =<< lift genVariableName
-            genLambda :: Int -> Gen (ProgramT Gen ProgramNode)
+            genVariable :: Monad m => Gen (ProgramT m ProgramNode)
+            genVariable = genVariableName >>= return . variable
+            genLambda :: Monad m => Int -> Gen (ProgramT m ProgramNode)
             genLambda l = do
                 n <- genVariableName
-                b <- genProgram l 
+                b <- genProgram l
                 return $ b >>= lambda n
-            genApp :: Int -> Gen (ProgramT Gen ProgramNode)
+            genApp :: Monad m => Int -> Gen (ProgramT m ProgramNode)
             genApp l = do
                 fM <- genProgram l
                 aM <- genProgram l
@@ -199,13 +200,20 @@ buildProgramT p = do
     (node, expr) <- flip runStateT empty $ unProgramT p
     return $ Expr node expr
 
+buildProgram :: ProgramT Identity ProgramNode -> Expr
+buildProgram = runIdentity . buildProgramT
+
 runProgramT :: Monad m => ProgramT m a -> m a
 runProgramT = withProgramT empty
+
+runProgram :: ProgramT Identity a -> a
+runProgram = runIdentity . withProgramT empty
 
 withProgramT :: Monad m => Program -> ProgramT m a -> m a
 withProgramT program = flip evalStateT program . unProgramT
 
-
+withProgram :: Program -> ProgramT Identity a -> a
+withProgram program = runIdentity . withProgramT program
 
 
 free :: Program -> [ProgramNode]
@@ -305,9 +313,15 @@ argument :: Program -> Node -> ProgramNode
 argument expr node = let [(_, a, Argument)] = filter (\(_, _, t) -> t == Argument) $ out expr node
                       in labNode' $ context expr a
 
+argument' :: Expr -> Expr
+argument' (Expr (n, _) expr) = Expr (argument expr n) expr
+
 function :: Program -> Node -> ProgramNode
 function expr node = let [(_, f, Function)] = filter (\(_, _, t) -> t == Function) $ out expr node
                       in labNode' $ context expr f
+
+function' :: Expr -> Expr
+function' (Expr (n, _) expr) = Expr (function expr n) expr
 
 
 
@@ -483,6 +497,18 @@ substitute :: Monad m => ProgramNode -> (Name, ProgramNode) -> ProgramT m Progra
 substitute v@(_, Variable vn) (name, m)
     | vn == name = return m
     | otherwise = return v
+substitute (an, App) (name, m) = do
+    program <- get
+    funSub <- function program an `substitute` (name `with` m)
+    argSub <- argument program an `substitute` (name `with` m)
+    app funSub argSub
+substitute l@(ln, Lambda name1) (name2, m)
+    | name1 == name2 = return l
+    | otherwise = do
+        program <- get
+        newBody <- body program ln `substitute` (name2 `with` m)
+        lambda name1 newBody
+
 
 with :: a -> b -> (a, b)
 a `with` b = (a,b)
@@ -499,7 +525,56 @@ spec_substitute = describe "substitute" $ do
         n <- variable "n"
         m <- y `substitute` ("x" `with` n)
         lift $ m `shouldBe` y
+    it "should substitute (m1 m2)[x := n] = (m1[x := n] m2[x := n])" $ property $
+        prop_substitute_app
+    it "should substitute λx.M[x := n] = λx.M" $ property $
+        prop_substitute_lambda_same_variable
+    it "should substitute (λy.M)[x := n] = λy.(M[x := n])" $ property $
+        prop_substitute_lambda_different_variable
 
+instance Show (ProgramT Identity ProgramNode) where
+    show = show . buildProgram
+
+prop_substitute_app :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
+prop_substitute_app m1 m2 nM = (function' asub) == m1sub && (argument' asub) == m2sub
+    where
+        asub = buildProgram $ do
+                fun <- m1
+                arg <- m2
+                n <- nM
+                a <- app fun arg
+                a `substitute` ("x" `with` n)
+
+        m1sub = buildProgram $ do
+                fun <- m1
+                n <- nM
+                fun `substitute` ("x" `with` n)
+        m2sub = buildProgram $ do
+                n <- nM
+                arg <- m2
+                arg `substitute` ("x" `with` n)
+
+prop_substitute_lambda_same_variable :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
+prop_substitute_lambda_same_variable m1 nM = unsub == sub
+    where
+        unsub = buildProgram $ lambda "x" =<< m1
+        sub = buildProgram $ do
+            l <- lambda "x" =<< m1
+            n <- nM
+            l `substitute` ("x" `with` n)
+
+prop_substitute_lambda_different_variable :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
+prop_substitute_lambda_different_variable m1M nM = lhs == rhs
+    where
+        lhs = buildProgram $ do
+            l <- lambda "y" =<< m1M
+            n <- nM
+            l `substitute` ("x" `with` n)
+        rhs = buildProgram $ do
+            m1 <- m1M
+            n <- nM
+            m1sub <- m1 `substitute` ("x" `with` n)
+            lambda "y" m1sub
 
 main :: IO ()
 main = hspec $ do
