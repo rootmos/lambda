@@ -24,8 +24,6 @@ type ExprEdge = LEdge EdgeLabel
 type ExprT m a = StateT Expr m a
 
 data Pair = Pair { node :: ExprNode, expr :: Expr }
-    deriving (Show)
-
 
 instance Arbitrary Pair where
     arbitrary = genExpr >>= buildExprT'
@@ -49,6 +47,12 @@ instance Arbitrary Pair where
                    app f a
             genVariableName :: Gen Name
             genVariableName = elements ["a","b","c","u","v","w","x","y","z"]
+
+instance Show Pair where
+    show (Pair (_, Variable name) _) = name
+    show (Pair (ln, Lambda name) expr) = "(λ" ++ name ++ "." ++ show (Pair (body expr ln) expr) ++ ")"
+    show (Pair (an, App) expr) = "(" ++ show (Pair (function expr an) expr) ++ " " ++ show (Pair ( argument expr an) expr) ++ ")"
+
 
 variable :: Monad m => Name -> ExprT m ExprNode
 variable n = do
@@ -416,3 +420,18 @@ main = hspec $ do
             n <- variable "n"
             m <- y `substitute` ("x" `with` n)
             lift $ m `shouldBe` y
+
+    describe "Pair's show instance" $ do
+        it "shows x correctly" $ do
+            p <- buildExprT' $ variable "x"
+            show p `shouldBe` "x"
+        it "shows λx.y correctly" $ do
+            p <- buildExprT' $ lambda "x" =<< variable "y"
+            show p `shouldBe` "(λx.y)"
+        it "shows x y correctly" $ do
+            p <- buildExprT' $ do
+               x <- variable "x"
+               y <- variable "y"
+               app x y
+            show p `shouldBe` "(x y)"
+
