@@ -1,6 +1,7 @@
 module Lamda where
 
 import Test.Hspec hiding (context)
+import Test.QuickCheck
 import Data.Graph.Inductive
 import Control.Monad.State
 import Debug.Trace
@@ -21,6 +22,33 @@ type ExprNode = LNode NodeLabel
 type ExprEdge = LEdge EdgeLabel
 
 type ExprT m a = StateT Expr m a
+
+data Pair = Pair { node :: ExprNode, expr :: Expr }
+    deriving (Show)
+
+
+instance Arbitrary Pair where
+    arbitrary = genExpr >>= buildExprT'
+        where
+            genExpr :: Gen (ExprT Gen ExprNode)
+            genExpr = oneof [genVariable, genLambda, genApp]
+            genVariable :: Gen (ExprT Gen ExprNode)
+            genVariable = return $ variable =<< lift genVariableName
+            genLambda :: Gen (ExprT Gen ExprNode)
+            genLambda = do
+                name <- genVariableName
+                body <- genExpr
+                return $ body >>= lambda name
+            genApp :: Gen (ExprT Gen ExprNode)
+            genApp = do
+                fM <- genExpr
+                aM <- genExpr
+                return $ do
+                   f <- fM
+                   a <- aM
+                   app f a
+            genVariableName :: Gen Name
+            genVariableName = elements ["a","b","c","u","v","w","x","y","z"]
 
 variable :: Monad m => Name -> ExprT m ExprNode
 variable n = do
@@ -57,6 +85,11 @@ newNode = get >>= return . head . newNodes 1
 
 buildExprT :: Monad m => ExprT m a -> m (a, Expr)
 buildExprT = flip runStateT empty
+
+buildExprT' :: Monad m => ExprT m ExprNode -> m Pair
+buildExprT' e = do
+    (node, expr) <- flip runStateT empty $ e
+    return $ Pair node expr
 
 runExprT :: Monad m => ExprT m a -> m a
 runExprT = flip evalStateT empty
@@ -131,6 +164,13 @@ alphaEquivalent :: (ExprNode, Expr) -> (ExprNode, Expr) -> Bool
 
 (_, _) `alphaEquivalent` (_, _) = False
 
+substitute :: Monad m => ExprNode -> (Name, ExprNode) -> ExprT m ExprNode
+substitute v@(n, Variable vn) (name, m)
+    | vn == name = return m
+    | otherwise = return v
+
+with :: a -> b -> (a, b)
+a `with` b = (a,b)
 
 main :: IO ()
 main = hspec $ do
@@ -365,3 +405,14 @@ main = hspec $ do
                y <- variable "y"
                lambda "y" =<< lambda "x" =<< app y x
             (expr1 `alphaEquivalent` expr2) `shouldBe` False
+    describe "substitute" $ do
+        it "should satisfy x[x := n] = n" $ runExprT $ do
+            x <- variable "x"
+            n <- variable "n"
+            m <- x `substitute` ("x" `with` n)
+            lift $ m `shouldBe` n
+        it "should satisfy y[x := n] = y" $ runExprT $ do
+            y <- variable "y"
+            n <- variable "n"
+            m <- y `substitute` ("x" `with` n)
+            lift $ m `shouldBe` y
