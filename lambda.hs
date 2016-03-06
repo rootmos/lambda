@@ -8,6 +8,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 import Debug.Trace
+import Data.List
 
 type Name = String
 
@@ -76,7 +77,7 @@ showHighlighted p (Expr (an, App) expr)
     | p an = highlight $ str
     | otherwise = str
         where
-            str = "(" ++ show (Expr (function expr an) expr) ++ " " ++ showHighlighted p (Expr ( argument expr an) expr) ++ ")"
+            str = "(" ++ showHighlighted p (Expr (function expr an) expr) ++ " " ++ showHighlighted p (Expr ( argument expr an) expr) ++ ")"
 
 highlight :: String -> String
 highlight s = "<<" ++ s ++ ">>"
@@ -411,8 +412,8 @@ spec_parents = describe "parents" $ do
 data AlphaEquivalence = AlphaEquivalent | NotAlphaEquivalent String
 
 instance Show AlphaEquivalence where
-    show AlphaEquivalent = "AlphaEquivalent"
-    show (NotAlphaEquivalent reason) = "Not alpha-equivalent because: " ++ reason
+    show AlphaEquivalent = "Alpha-equivalent"
+    show (NotAlphaEquivalent r) = "Not alpha-equivalent because: " ++ r
 
 instance Eq AlphaEquivalence where
     AlphaEquivalent == AlphaEquivalent = True
@@ -427,23 +428,39 @@ alphaEquivalent e1 e2 = case alphaEquivalent' e1 e2 of
 alphaEquivalent' :: Expr -> Expr -> AlphaEquivalence
 alphaEquivalent' e1 e2 = case runWriter $ alphaEquivalentWriter (e1, e2) e1 e2 of
                            (True, _) -> AlphaEquivalent
-                           (False, reason) -> NotAlphaEquivalent reason
+                           (False, r) -> NotAlphaEquivalent r
 
 alphaEquivalentWriter :: (Expr, Expr) -> Expr -> Expr -> Writer String Bool
-alphaEquivalentWriter start (Expr (n1, Variable _) program1) (Expr (n2, Variable _) program2)
-    | isFree program1 n1 = do
+alphaEquivalentWriter start (Expr (n1, Variable name1) program1) (Expr (n2, Variable name2) program2)
+    | isFree program1 n1 && isFree program2 n2 =
+       case name1 == name2 of
+         True -> return True
+         False -> do
+             tell $ "free variables with different names are not alpha-equivalent: "
+             tell $ showHighlighted (==n1) (fst start)
+             tell $ " and "
+             tell $ showHighlighted (==n2) (snd start)
+             return False
+    | isFree program1 n1 && not (isFree program2 n2) = do
         tell $ "variable is not free in first expression: "
         tell $ showHighlighted (==n1) (fst start)
         tell $ " when compared to second expression: " 
         tell $ showHighlighted (==n2) (snd start)
         return False
-    | isFree program2 n2 = do
+    | not (isFree program1 n1) && isFree program2 n2 = do
         tell $ "variable is not free in second expression: "
         tell $ showHighlighted (==n2) (snd start)
         tell $ " when compared to first expression: " 
         tell $ showHighlighted (==n1) (fst start)
         return False
-    | otherwise = return $ bindingHeight program1 n1 == bindingHeight program2 n2
+    | bindingHeight program1 n1 == bindingHeight program2 n2 = return True
+    | otherwise = do
+        tell $ "variables are bound by different abstractions: "
+        tell $ showHighlighted (\n -> n == n1 || n == bindingNode program1 n1) (fst start)
+        tell $ " and "
+        tell $ showHighlighted (\n -> n == n2 || n == bindingNode program2 n2) (snd start)
+        return False
+
         where
             bindingHeight expr n = length $ takeWhile (\(m, _) -> m /= bindingNode expr n) $ parents expr n
             bindingNode expr n = let [(_, ln, Binding)] = out expr n in ln
@@ -453,28 +470,38 @@ alphaEquivalentWriter start (Expr (n1, Lambda _) program1) (Expr (n2, Lambda _) 
 
 alphaEquivalentWriter start (Expr (n1, App) program1) (Expr (n2, App) program2) = do
     functionPart <- alphaEquivalentWriter start (Expr (function program1 n1) program1) (Expr (function program2 n2) program2)
-    argumentPart <- alphaEquivalentWriter start (Expr (argument program1 n1) program1) (Expr (argument program2 n2) program2)
-    return $ functionPart && argumentPart
+    case functionPart of
+      False -> return functionPart
+      True -> alphaEquivalentWriter start (Expr (argument program1 n1) program1) (Expr (argument program2 n2) program2)
 
-alphaEquivalentWriter _  _ _ = return False
+alphaEquivalentWriter start e1 e2 = do
+    tell $ "comparing expressions with different structures: "
+    tell $ showHighlighted (== (fst $ exprNode e1)) (fst start)
+    tell $ " and "
+    tell $ showHighlighted (== (fst $ exprNode e2)) (snd start)
+    return False
 
 spec_alphaEquivalent :: SpecWith ()
 spec_alphaEquivalent = describe "alphaEquivalent" $ do
+    it "claims x and x are alpha-equivalent" $ do
+        expr1 <- buildProgramT $ variable "x"
+        expr2 <- buildProgramT $ variable "x"
+        (expr1 `alphaEquivalent'` expr2) `shouldBe` AlphaEquivalent
     it "claims x and y are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ variable "x"
         expr2 <- buildProgramT $ variable "y"
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
     it "claims λx.x and y are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ lambda "x" =<< variable "x"
         expr2 <- buildProgramT $ variable "y"
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
     it "claims x y and z are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ do
            x <- variable "x"
            y <- variable "y"
            app x y
         expr2 <- buildProgramT $ variable "z"
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
     it "claims x y and u v are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ do
            x <- variable "x"
@@ -484,7 +511,17 @@ spec_alphaEquivalent = describe "alphaEquivalent" $ do
            u <- variable "u"
            v <- variable "v"
            app u v
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
+    it "claims x y and x y are alpha-equivalent" $ do
+        expr1 <- buildProgramT $ do
+           x <- variable "x"
+           y <- variable "y"
+           app x y
+        expr2 <- buildProgramT $ do
+           u <- variable "x"
+           v <- variable "y"
+           app u v
+        (expr1 `alphaEquivalent'` expr2) `shouldBe` AlphaEquivalent
     it "claims λx.λy.x y and λu.λu.u u are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ do
            x <- variable "x"
@@ -494,29 +531,33 @@ spec_alphaEquivalent = describe "alphaEquivalent" $ do
            u1 <- variable "u"
            u2 <- variable "u"
            lambda "u" =<< lambda "u" =<< app u1 u2
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
     it "claims λx.x and λy.y are alpha-equivalent" $ do
         expr1 <- buildProgramT $ lambda "x" =<< variable "x"
         expr2 <- buildProgramT $ lambda "y" =<< variable "y"
-        (expr1 `alphaEquivalent` expr2) `shouldBe` True
+        (expr1 `alphaEquivalent'` expr2) `shouldBe` AlphaEquivalent
+    it "claims λx.y and λz.y are alpha-equivalent" $ do
+        expr1 <- buildProgramT $ lambda "x" =<< variable "y"
+        expr2 <- buildProgramT $ lambda "z" =<< variable "y"
+        (expr1 `alphaEquivalent'` expr2) `shouldBe` AlphaEquivalent
     it "claims λx.y and λz.z are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ lambda "x" =<< variable "y"
         expr2 <- buildProgramT $ lambda "z" =<< variable "z"
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
 
     -- Examples from: https://en.wikipedia.org/wiki/Lambda_calculus#.CE.B1-conversion
     it "claims λx.λx.x and λy.λx.x are alpha-equivalent" $ do
         expr1 <- buildProgramT $ lambda "x" =<< lambda "x" =<< variable "x"
         expr2 <- buildProgramT $ lambda "y" =<< lambda "x" =<< variable "x"
-        (expr1 `alphaEquivalent` expr2) `shouldBe` True
+        (expr1 `alphaEquivalent'` expr2) `shouldBe` AlphaEquivalent
     it "claims λx.λx.x and λy.λx.y are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ lambda "x" =<< lambda "x" =<< variable "x"
         expr2 <- buildProgramT $ lambda "y" =<< lambda "x" =<< variable "y"
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
     it "claims λx.λy.x and λy.λy.y are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ lambda "x" =<< lambda "y" =<< variable "x"
         expr2 <- buildProgramT $ lambda "y" =<< lambda "y" =<< variable "y"
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
 
     it "claims λx.y x and λx.x y are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ do
@@ -527,7 +568,7 @@ spec_alphaEquivalent = describe "alphaEquivalent" $ do
            x <- variable "x"
            y <- variable "y"
            lambda "x" =<< app y x
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
 
     it "claims λy.λx.y x and λy.λx.x y are not alpha-equivalent" $ do
         expr1 <- buildProgramT $ do
@@ -538,7 +579,7 @@ spec_alphaEquivalent = describe "alphaEquivalent" $ do
            x <- variable "x"
            y <- variable "y"
            lambda "y" =<< lambda "x" =<< app y x
-        (expr1 `alphaEquivalent` expr2) `shouldBe` False
+        (expr1 `alphaEquivalent'` expr2) `shouldNotBe` AlphaEquivalent
 
 
 
@@ -558,8 +599,18 @@ substitute l@(ln, Lambda name1) (name2, m)
     | otherwise = do
         program <- get
         newBody <- body program ln `substitute` (name2 `with` m)
-        lambda name1 newBody
+        program2 <- get
+        let freeVariables = map (\n -> variableName program2 n) $ filter (\n -> isFree program2 n) $ bfs (fst newBody) program2
+        let newName = case find (==name1) freeVariables of
+                        Just _ -> head $ dropWhile (\name -> name `elem` freeVariables) variableNames
+                        Nothing -> name1
+        lambda newName newBody
 
+variableNames :: [Name]
+variableNames = postfixAlphas [""] ++ postfixAlphas variableNames
+    where
+        postfixAlphas strings = concat $ map (\str -> map (\c -> str ++ [c]) alphas) strings
+        alphas = ['a'..'z']
 
 with :: a -> b -> (a, b)
 a `with` b = (a,b)
@@ -615,18 +666,18 @@ spec_substitute = describe "substitute" $ do
             lambda "z" x
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
 
-    it "should substitute (m1 m2)[x := n] = (m1[x := n] m2[x := n])" $ property $
+    it "should substitute (m1 m2)[x := n] = (m1[x := n] m2[x := n]), where m1,m2,n are arbitrary lambda expressions" $ property $
         prop_substitute_app
-    it "should substitute λx.M[x := n] = λx.M" $ property $
+    it "should substitute λx.m[x := n] = λx.m, where m,n are arbitrary lambda expressions" $ property $
         prop_substitute_lambda_same_variable
-    it "should substitute (λy.M)[x := n] = λy.(M[x := n])" $ property $
+    it "should substitute (λy.m)[x := n] = λy.(m[x := n]), where m,n are arbitrary lambda expressions" $ property $
         prop_substitute_lambda_different_variable
 
 instance Show (ProgramT Identity ProgramNode) where
     show = show . buildProgram
 
 prop_substitute_app :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
-prop_substitute_app m1 m2 nM = (function' asub) == m1sub && (argument' asub) == m2sub
+prop_substitute_app m1 m2 nM = (function' asub) `alphaEquivalent` m1sub && (argument' asub) `alphaEquivalent` m2sub
     where
         asub = buildProgram $ do
                 fun <- m1
@@ -645,7 +696,7 @@ prop_substitute_app m1 m2 nM = (function' asub) == m1sub && (argument' asub) == 
                 arg `substitute` ("x" `with` n)
 
 prop_substitute_lambda_same_variable :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
-prop_substitute_lambda_same_variable m1 nM = unsub == sub
+prop_substitute_lambda_same_variable m1 nM = unsub `alphaEquivalent` sub
     where
         unsub = buildProgram $ lambda "x" =<< m1
         sub = buildProgram $ do
