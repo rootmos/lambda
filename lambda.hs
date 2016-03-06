@@ -31,29 +31,46 @@ newtype ProgramT m a = ProgramT {unProgramT :: StateT Program m a}
 data Expr = Expr { exprNode :: ProgramNode, exprProgram :: Program }
 
 instance Monad m => Arbitrary (ProgramT m ProgramNode) where
-    arbitrary = genProgram 2 -- =<< (liftM getPositive $ arbitrary)
+    arbitrary = sized genProgram
+
+newtype YIsFreeProgramNode m = YIsFreeProgramNode (ProgramT m ProgramNode)
+
+instance Show (ProgramT Identity ProgramNode) where
+    show = show . buildProgram
+instance Show (YIsFreeProgramNode Identity) where
+    show (YIsFreeProgramNode nM) = show . buildProgram $ nM
+
+instance Arbitrary (YIsFreeProgramNode Identity)  where
+    arbitrary = suchThat myGeneratedProgram yIsFree
         where
-            genProgram :: Monad m => Int -> Gen (ProgramT m ProgramNode)
-            genProgram l
-                | l > 0 = oneof [genVariable, genLambda (l - 1), genApp (l - 1)]
-                | otherwise = genVariable
-            genVariable :: Monad m => Gen (ProgramT m ProgramNode)
-            genVariable = genVariableName >>= return . variable
-            genLambda :: Monad m => Int -> Gen (ProgramT m ProgramNode)
-            genLambda l = do
-                n <- genVariableName
-                b <- genProgram l
-                return $ b >>= lambda n
-            genApp :: Monad m => Int -> Gen (ProgramT m ProgramNode)
-            genApp l = do
-                fM <- genProgram l
-                aM <- genProgram l
-                return $ do
-                   f <- fM
-                   a <- aM
-                   app f a
-            genVariableName :: Gen Name
-            genVariableName = elements ["a","b","c","u","v","w","x","y","z"]
+            myGeneratedProgram = liftM YIsFreeProgramNode $ sized genProgram
+            yIsFree (YIsFreeProgramNode programNodeM) = runIdentity $ runProgramT $ do
+                programNode <- programNodeM
+                program <- get
+                let freeVariables = map (\n -> variableName program n) $ filter (\n -> isFree program n) $ bfs (fst programNode) program
+                return $ "y" `notElem` freeVariables
+
+genProgram :: Monad m => Int -> Gen (ProgramT m ProgramNode)
+genProgram l
+    | l > 0 = oneof [genVariable, genLambda (l - 1), genApp (l - 1)]
+    | otherwise = genVariable
+genVariable :: Monad m => Gen (ProgramT m ProgramNode)
+genVariable = genVariableName >>= return . variable
+genLambda :: Monad m => Int -> Gen (ProgramT m ProgramNode)
+genLambda l = do
+    n <- genVariableName
+    b <- genProgram l
+    return $ b >>= lambda n
+genApp :: Monad m => Int -> Gen (ProgramT m ProgramNode)
+genApp l = do
+    fM <- genProgram l
+    aM <- genProgram l
+    return $ do
+       f <- fM
+       a <- aM
+       app f a
+genVariableName :: Gen Name
+genVariableName = elements ["a","b","c","u","v","w","x","y","z"]
 
 instance Arbitrary Expr where
     arbitrary = arbitrary >>= buildProgramT
@@ -350,7 +367,7 @@ parent :: Program -> Node -> Maybe (Node, EdgeLabel)
 parent expr node = case filter relevantEdge $ inn expr node of
                      [] -> Nothing
                      [(i, _, t)] -> Just (i, t)
-                     x -> error $ "Invariant violated: more than one parent: " ++ show x ++ prettify expr
+                     _ -> error $ "Invariant violated: more than one parent"
                     where
                         relevantEdge (_, _, Body) = True
                         relevantEdge (_, _, Function) = True
@@ -737,16 +754,34 @@ spec_substitute = describe "substitute" $ do
             x <- variable "x"
             lambda "z" x
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+    it "should substitute (λy.x)[x := (u (w y))] alpha-equivalently to λz.(u (w y))" $ do
+        lhs <- buildProgramT $ do
+            l <- lambda "y" =<< variable "x"
+            n <- do
+                fun <- variable "u"
+                arg <- do
+                    w <- variable "w"
+                    y <- variable "y"
+                    app w y
+                app fun arg
+            l `substitute` ("x" `with` n)
+        rhs <- buildProgramT $ do
+            lambda "z" =<< do
+                fun <- variable "u"
+                arg <- do
+                    w <- variable "w"
+                    y <- variable "y"
+                    app w y
+                app fun arg
+        lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
 
     it "should substitute (m1 m2)[x := n] = (m1[x := n] m2[x := n]), where m1,m2,n are arbitrary lambda expressions" $ property $
         prop_substitute_app
     it "should substitute λx.m[x := n] = λx.m, where m,n are arbitrary lambda expressions" $ property $
         prop_substitute_lambda_same_variable
-    it "should substitute (λy.m)[x := n] = λy.(m[x := n]), where m,n are arbitrary lambda expressions" $ property $
+    it "should substitute (λy.m)[x := n] = λy.(m[x := n]), where m,n are arbitrary lambda expressions such that y not in FV(n)" $ property $
         prop_substitute_lambda_different_variable
 
-instance Show (ProgramT Identity ProgramNode) where
-    show = show . buildProgram
 
 prop_substitute_app :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
 prop_substitute_app m1 m2 nM = (function' asub) `alphaEquivalent` m1sub && (argument' asub) `alphaEquivalent` m2sub
@@ -768,7 +803,7 @@ prop_substitute_app m1 m2 nM = (function' asub) `alphaEquivalent` m1sub && (argu
                 arg `substitute` ("x" `with` n)
 
 prop_substitute_lambda_same_variable :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
-prop_substitute_lambda_same_variable m1 nM = unsub `alphaEquivalent` sub
+prop_substitute_lambda_same_variable m1 nM = unsub == sub
     where
         unsub = buildProgram $ lambda "x" =<< m1
         sub = buildProgram $ do
@@ -776,8 +811,8 @@ prop_substitute_lambda_same_variable m1 nM = unsub `alphaEquivalent` sub
             n <- nM
             l `substitute` ("x" `with` n)
 
-prop_substitute_lambda_different_variable :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
-prop_substitute_lambda_different_variable m1M nM = lhs == rhs
+prop_substitute_lambda_different_variable :: ProgramT Identity ProgramNode -> YIsFreeProgramNode Identity -> Bool
+prop_substitute_lambda_different_variable m1M (YIsFreeProgramNode nM) = lhs `alphaEquivalent` rhs
     where
         lhs = buildProgram $ do
             l <- lambda "y" =<< m1M
