@@ -31,7 +31,7 @@ newtype ProgramT m a = ProgramT {unProgramT :: StateT Program m a}
 data Expr = Expr { exprNode :: ProgramNode, exprProgram :: Program }
 
 instance Monad m => Arbitrary (ProgramT m ProgramNode) where
-    arbitrary = genProgram =<< (liftM getPositive $ arbitrary)
+    arbitrary = genProgram 2 -- =<< (liftM getPositive $ arbitrary)
         where
             genProgram :: Monad m => Int -> Gen (ProgramT m ProgramNode)
             genProgram l
@@ -350,7 +350,7 @@ parent :: Program -> Node -> Maybe (Node, EdgeLabel)
 parent expr node = case filter relevantEdge $ inn expr node of
                      [] -> Nothing
                      [(i, _, t)] -> Just (i, t)
-                     _ -> error "Invariant violated: more than one parent"
+                     x -> error $ "Invariant violated: more than one parent: " ++ show x ++ prettify expr
                     where
                         relevantEdge (_, _, Body) = True
                         relevantEdge (_, _, Function) = True
@@ -593,6 +593,7 @@ substitute (an, App) (name, m) = do
     program <- get
     funSub <- function program an `substitute` (name `with` m)
     argSub <- argument program an `substitute` (name `with` m)
+    modify $ delNode an
     app funSub argSub
 substitute l@(ln, Lambda name1) (name2, m)
     | name1 == name2 = return l
@@ -670,10 +671,61 @@ spec_substitute = describe "substitute" $ do
     it "should make (λy.y)[x := u] alpha-equivalent with (λy.y)" $ do
         lhs <- buildProgramT $ do
             l <- lambda "y" =<< variable "y"
-            y <- variable "u"
-            l `substitute` ("x" `with` y)
+            u <- variable "u"
+            l `substitute` ("x" `with` u)
         rhs <- buildProgramT $ do
             lambda "y" =<< variable "y"
+        lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+    it "should make ((λv.v) z)[x := u] alpha-equivalent with ((λv.v) z)" $ do
+        lhs <- buildProgramT $ do
+            fun <- lambda "v" =<< variable "v"
+            arg <- variable "z"
+            a <- app fun arg
+
+            u <- variable "u"
+            a `substitute` ("x" `with` u)
+        rhs <- buildProgramT $ do
+            fun <- lambda "v" =<< variable "v"
+            arg <- variable "z"
+            app fun arg
+        lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+    it "should make (u (λy.(v y)))[x := (λx.(λv.v))] alpha-equivalently with itself" $ do
+        lhs <- buildProgramT $ do
+            fun <- variable "u"
+            arg <- lambda "y" =<< do
+                v <- variable "v"
+                y <- variable "y"
+                app v y
+            a <- app fun arg
+
+            n <- lambda "x" =<< lambda "v" =<< variable "v"
+            a `substitute` ("x" `with` n)
+        rhs <- buildProgramT $ do
+            fun <- variable "u"
+            arg <- lambda "y" =<< do
+                v <- variable "v"
+                y <- variable "y"
+                app v y
+            app fun arg
+        lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+    it "should make (u (λy.v))[x := u] alpha-equivalently with itself" $ do
+        lhs <- buildProgramT $ do
+            fun <- variable "u"
+            arg <- lambda "y" =<< do
+                v <- variable "v"
+                y <- variable "y"
+                app v y
+            a <- app fun arg
+
+            u <- variable "u"
+            a `substitute` ("x" `with` u)
+        rhs <- buildProgramT $ do
+            fun <- variable "u"
+            arg <- lambda "y" =<< do
+                v <- variable "v"
+                y <- variable "y"
+                app v y
+            app fun arg
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
     it "should substitute (λx.y)[y := x] alpha-equivalently to λz.x" $ do
         lhs <- buildProgramT $ do
