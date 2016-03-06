@@ -6,6 +6,7 @@ import Test.QuickCheck
 import Data.Graph.Inductive
 import Control.Monad.Identity
 import Control.Monad.State
+import Control.Monad.Writer
 import Debug.Trace
 
 type Name = String
@@ -60,6 +61,25 @@ instance Show Expr where
     show (Expr (_, Variable name) _) = name
     show (Expr (ln, Lambda name) expr) = "(λ" ++ name ++ "." ++ show (Expr (body expr ln) expr) ++ ")"
     show (Expr (an, App) expr) = "(" ++ show (Expr (function expr an) expr) ++ " " ++ show (Expr ( argument expr an) expr) ++ ")"
+
+
+showHighlighted :: (Node -> Bool) -> Expr -> String
+showHighlighted p (Expr (vn, Variable name) _)
+    | p vn = highlight name
+    | otherwise = name
+showHighlighted p (Expr (ln, Lambda name) expr)
+    | p ln = highlight $ str
+    | otherwise = str
+        where
+            str = "(λ" ++ name ++ "." ++ showHighlighted p (Expr (body expr ln) expr) ++ ")"
+showHighlighted p (Expr (an, App) expr)
+    | p an = highlight $ str
+    | otherwise = str
+        where
+            str = "(" ++ show (Expr (function expr an) expr) ++ " " ++ showHighlighted p (Expr ( argument expr an) expr) ++ ")"
+
+highlight :: String -> String
+highlight s = "<<" ++ s ++ ">>"
 
 spec_Expr_Show_instance :: SpecWith ()
 spec_Expr_Show_instance = describe "Expr's show instance" $ do
@@ -388,24 +408,55 @@ spec_parents = describe "parents" $ do
 
 
 
+data AlphaEquivalence = AlphaEquivalent | NotAlphaEquivalent String
+
+instance Show AlphaEquivalence where
+    show AlphaEquivalent = "AlphaEquivalent"
+    show (NotAlphaEquivalent reason) = "Not alpha-equivalent because: " ++ reason
+
+instance Eq AlphaEquivalence where
+    AlphaEquivalent == AlphaEquivalent = True
+    NotAlphaEquivalent _ == NotAlphaEquivalent _ = True
+    _ == _ = False
 
 alphaEquivalent :: Expr -> Expr -> Bool
-(Expr (n1, Variable _) expr1) `alphaEquivalent` (Expr (n2, Variable _) expr2)
-    | isFree expr1 n1 = False
-    | isFree expr2 n2 = False
-    | otherwise = bindingHeight expr1 n1 == bindingHeight expr2 n2
+alphaEquivalent e1 e2 = case alphaEquivalent' e1 e2 of
+                          AlphaEquivalent -> True
+                          NotAlphaEquivalent _ -> False
+
+alphaEquivalent' :: Expr -> Expr -> AlphaEquivalence
+alphaEquivalent' e1 e2 = case runWriter $ alphaEquivalentWriter (e1, e2) e1 e2 of
+                           (True, _) -> AlphaEquivalent
+                           (False, reason) -> NotAlphaEquivalent reason
+
+alphaEquivalentWriter :: (Expr, Expr) -> Expr -> Expr -> Writer String Bool
+alphaEquivalentWriter start (Expr (n1, Variable _) program1) (Expr (n2, Variable _) program2)
+    | isFree program1 n1 = do
+        tell $ "variable is not free in first expression: "
+        tell $ showHighlighted (==n1) (fst start)
+        tell $ " when compared to second expression: " 
+        tell $ showHighlighted (==n2) (snd start)
+        return False
+    | isFree program2 n2 = do
+        tell $ "variable is not free in second expression: "
+        tell $ showHighlighted (==n2) (snd start)
+        tell $ " when compared to first expression: " 
+        tell $ showHighlighted (==n1) (fst start)
+        return False
+    | otherwise = return $ bindingHeight program1 n1 == bindingHeight program2 n2
         where
             bindingHeight expr n = length $ takeWhile (\(m, _) -> m /= bindingNode expr n) $ parents expr n
             bindingNode expr n = let [(_, ln, Binding)] = out expr n in ln
 
-(Expr (n1, Lambda _) expr1) `alphaEquivalent` (Expr (n2, Lambda _) expr2) =
-    (Expr (body expr1 n1) expr1) `alphaEquivalent` (Expr (body expr2 n2) expr2)
+alphaEquivalentWriter start (Expr (n1, Lambda _) program1) (Expr (n2, Lambda _) program2) =
+    alphaEquivalentWriter start (Expr (body program1 n1) program1) (Expr (body program2 n2) program2)
 
-(Expr (n1, App) expr1) `alphaEquivalent` (Expr (n2, App) expr2) =
-    (Expr (function expr1 n1) expr1) `alphaEquivalent` (Expr (function expr2 n2) expr2)
-    && (Expr (argument expr1 n1) expr1) `alphaEquivalent` (Expr (argument expr2 n2) expr2)
+alphaEquivalentWriter start (Expr (n1, App) program1) (Expr (n2, App) program2) = do
+    functionPart <- alphaEquivalentWriter start (Expr (function program1 n1) program1) (Expr (function program2 n2) program2)
+    argumentPart <- alphaEquivalentWriter start (Expr (argument program1 n1) program1) (Expr (argument program2 n2) program2)
+    return $ functionPart && argumentPart
 
-_ `alphaEquivalent` _ = False
+alphaEquivalentWriter _  _ _ = return False
 
 spec_alphaEquivalent :: SpecWith ()
 spec_alphaEquivalent = describe "alphaEquivalent" $ do
@@ -543,7 +594,26 @@ spec_substitute = describe "substitute" $ do
         program <- get
         lift $ function program sub `shouldBe` n
         lift $ argument program sub `shouldBe` y
-
+    it "should substitute (λy.x)[x := n] = λy.n" $ do
+        lhs <- buildProgramT $ do
+            x <- variable "x"
+            n <- variable "n"
+            l <- lambda "y" x
+            l `substitute` ("x" `with` n)
+        rhs <- buildProgramT $ do
+            n <- variable "n"
+            lambda "y" n
+        lhs `shouldBe` rhs
+    it "should substitute (λx.y)[y := x] alpha-equivalently to λz.x" $ do
+        lhs <- buildProgramT $ do
+            y <- variable "y"
+            l <- lambda "x" y
+            x <- variable "x"
+            l `substitute` ("y" `with` x)
+        rhs <- buildProgramT $ do
+            x <- variable "x"
+            lambda "z" x
+        lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
 
     it "should substitute (m1 m2)[x := n] = (m1[x := n] m2[x := n])" $ property $
         prop_substitute_app
