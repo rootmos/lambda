@@ -525,6 +525,26 @@ spec_substitute = describe "substitute" $ do
         n <- variable "n"
         m <- y `substitute` ("x" `with` n)
         lift $ m `shouldBe` y
+    it "should substitute (x x)[x := n] = (n n)" $ runProgramT $ do
+        x1 <- variable "x"
+        x2 <- variable "x"
+        a <- app x1 x2
+        n <- variable "n"
+        (sub, App) <- a `substitute` ("x" `with` n)
+        program <- get
+        lift $ function program sub `shouldBe` n
+        lift $ argument program sub `shouldBe` n
+    it "should substitute (x y)[x := n] = (n y)" $ runProgramT $ do
+        x <- variable "x"
+        y <- variable "y"
+        a <- app x y
+        n <- variable "n"
+        (sub, App) <- a `substitute` ("x" `with` n)
+        program <- get
+        lift $ function program sub `shouldBe` n
+        lift $ argument program sub `shouldBe` y
+
+
     it "should substitute (m1 m2)[x := n] = (m1[x := n] m2[x := n])" $ property $
         prop_substitute_app
     it "should substitute λx.M[x := n] = λx.M" $ property $
