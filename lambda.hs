@@ -599,11 +599,11 @@ substitute l@(ln, Lambda name1) (name2, m)
     | otherwise = do
         program <- get
         newBody <- body program ln `substitute` (name2 `with` m)
-        program2 <- get
-        let freeVariables = map (\n -> variableName program2 n) $ filter (\n -> isFree program2 n) $ bfs (fst newBody) program2
+        let freeVariables = map (\n -> variableName program n) $ filter (\n -> isFree program n) $ bfs (fst newBody) program
         let newName = case find (==name1) freeVariables of
                         Just _ -> head $ dropWhile (\name -> name `elem` freeVariables) variableNames
                         Nothing -> name1
+        modify $ delNode ln
         lambda newName newBody
 
 variableNames :: [Name]
@@ -655,6 +655,26 @@ spec_substitute = describe "substitute" $ do
             n <- variable "n"
             lambda "y" n
         lhs `shouldBe` rhs
+    it "should substitute (λz.x x)[x := n] alpha-equivalently (λz.n n)" $ do
+        lhs <- buildProgramT $ do
+            x1 <- variable "x"
+            x2 <- variable "x"
+            l <- lambda "z" =<< app x1 x2
+            n <- variable "n"
+            l `substitute` ("x" `with` n)
+        rhs <- buildProgramT $ do
+            n1 <- variable "n"
+            n2 <- variable "n"
+            lambda "z" =<< app n1 n2
+        lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+    it "should make (λy.y)[x := u] alpha-equivalent with (λy.y)" $ do
+        lhs <- buildProgramT $ do
+            l <- lambda "y" =<< variable "y"
+            y <- variable "u"
+            l `substitute` ("x" `with` y)
+        rhs <- buildProgramT $ do
+            lambda "y" =<< variable "y"
+        lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
     it "should substitute (λx.y)[y := x] alpha-equivalently to λz.x" $ do
         lhs <- buildProgramT $ do
             y <- variable "y"
