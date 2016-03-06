@@ -1,4 +1,4 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances, OverlappingInstances #-}
 module Lamda where
 
 import Test.Hspec hiding (context)
@@ -33,10 +33,22 @@ data Expr = Expr { exprNode :: ProgramNode, exprProgram :: Program }
 instance Monad m => Arbitrary (ProgramT m ProgramNode) where
     arbitrary = sized genProgram
 
+instance Arbitrary (ProgramT Identity ProgramNode) where
+    arbitrary = sized genProgram
+    shrink programM = runProgram $ do
+        node <- programM
+        program <- get
+        case node of
+          (vn, Variable _) -> return []
+          (ln, Lambda _) -> return [programM >> get >>= (\p -> return $ body p ln)]
+          (an, App) -> return [ programM >> get >>= (\p -> return $ argument p an)
+                              , programM >> get >>= (\p -> return $ function p an)]
+
 newtype YIsFreeProgramNode m = YIsFreeProgramNode (ProgramT m ProgramNode)
 
 instance Show (ProgramT Identity ProgramNode) where
     show = show . buildProgram
+
 instance Show (YIsFreeProgramNode Identity) where
     show (YIsFreeProgramNode nM) = show . buildProgram $ nM
 
@@ -663,6 +675,18 @@ spec_substitute = describe "substitute" $ do
         program <- get
         lift $ function program sub `shouldBe` n
         lift $ argument program sub `shouldBe` y
+    it "should substitute (a b)[x := c] = (a b)" $ do
+        lhs <- buildProgramT $ do
+            fun <- variable "a"
+            arg <- variable "b"
+            a <- app fun arg
+            c <- variable "c"
+            a `substitute` ("x" `with` c)
+        rhs <- buildProgramT $ do
+            fun <- variable "a"
+            arg <- variable "b"
+            app fun arg
+        lhs `shouldBe` rhs
     it "should substitute (λy.x)[x := n] = λy.n" $ do
         lhs <- buildProgramT $ do
             x <- variable "x"
