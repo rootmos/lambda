@@ -39,10 +39,14 @@ instance Arbitrary (ProgramT Identity ProgramNode) where
         node <- programM
         program <- get
         case node of
-          (vn, Variable _) -> return []
-          (ln, Lambda _) -> return [programM >> get >>= (\p -> return $ body p ln)]
-          (an, App) -> return [ programM >> get >>= (\p -> return $ argument p an)
-                              , programM >> get >>= (\p -> return $ function p an)]
+          (_, Variable _) -> return []
+          (ln, Lambda _) -> return [saveAndReturn . copy program $ body program ln]
+          (an, App) -> return [ saveAndReturn . copy program $ function program an
+                              , saveAndReturn . copy program $ argument program an]
+
+
+saveAndReturn :: Monad m => Expr -> ProgramT m ProgramNode
+saveAndReturn expr = put (exprProgram expr) >> return (exprNode expr)
 
 newtype YIsFreeProgramNode m = YIsFreeProgramNode (ProgramT m ProgramNode)
 
@@ -265,6 +269,76 @@ withProgramT program = flip evalStateT program . unProgramT
 withProgram :: Program -> ProgramT Identity a -> a
 withProgram program = runIdentity . withProgramT program
 
+
+copy :: Program -> ProgramNode -> Expr
+copy p pn = buildProgram $ builder pn  
+    where
+        builder (_, Variable name) = variable name
+        builder (ln, Lambda name) = lambda name =<< builder (body p ln)
+        builder (an, App) = do
+            fun <- builder (function p an)
+            arg <- builder (argument p an)
+            app fun arg
+
+spec_copy :: SpecWith ()
+spec_copy = describe "copy" $ do
+    it "returns only the relevant nodes" $ do
+        original <- buildProgramT $ do
+            _ <- variable "unnecessary"
+            lambda "x" =<< variable "x"
+        expected <- buildProgramT $ lambda "x" =<< variable "x"
+
+        let got = copy (exprProgram original) (exprNode original)
+
+        got `shouldBe` expected
+        (length . free $ exprProgram got) `shouldBe` (length . free $ exprProgram expected)
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "copies x in λx.x to a free variable x" $ do
+        original <- buildProgramT $ do
+           x <- variable "x"
+           _ <- lambda "x" x
+           return x
+        expected <- buildProgramT $ variable "x"
+
+        let got = copy (exprProgram original) (exprNode original)
+
+        got `shouldBe` expected
+        (length . free $ exprProgram got) `shouldBe` (length . free $ exprProgram expected)
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "copies x in x y to a variable x" $ do
+        original <- buildProgramT $ do
+           x <- variable "x"
+           y <- variable "y"
+           _ <- app x y
+           return x
+        expected <- buildProgramT $ variable "x"
+
+        let got = copy (exprProgram original) (exprNode original)
+
+        got `shouldBe` expected
+        (length . free $ exprProgram got) `shouldBe` (length . free $ exprProgram expected)
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "copies (x y) in λx.(x y) to (x y) where both x and y are free" $ do
+        original <- buildProgramT $ do
+           x <- variable "x"
+           y <- variable "y"
+           a <- app x y
+           _ <- lambda "x" a
+           return a
+        expected <- buildProgramT $ do
+           x <- variable "x"
+           y <- variable "y"
+           app x y
+
+        let got = copy (exprProgram original) (exprNode original)
+
+        got `shouldBe` expected
+        (length . free $ exprProgram got) `shouldBe` (length . free $ exprProgram expected)
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
 
 free :: Program -> [ProgramNode]
 free expr = labNodes $ labnfilter labledIsFreeVariable expr
@@ -687,6 +761,7 @@ spec_substitute = describe "substitute" $ do
             arg <- variable "b"
             app fun arg
         lhs `shouldBe` rhs
+        lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
     it "should substitute (λy.x)[x := n] = λy.n" $ do
         lhs <- buildProgramT $ do
             x <- variable "x"
@@ -818,8 +893,8 @@ prop_substitute_app m1 m2 nM = (function' asub) `alphaEquivalent` m1sub && (argu
                 a `substitute` ("x" `with` n)
 
         m1sub = buildProgram $ do
-                fun <- m1
                 n <- nM
+                fun <- m1
                 fun `substitute` ("x" `with` n)
         m2sub = buildProgram $ do
                 n <- nM
@@ -860,3 +935,4 @@ main = hspec $ do
     spec_substitute
     spec_Expr_Show_instance
     spec_Expr_Eq_instance
+    spec_copy
