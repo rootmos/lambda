@@ -550,16 +550,16 @@ alphaEquivalentWriter start (Expr (n1, Variable name1) program1) (Expr (n2, Vari
              tell $ showHighlighted (==n2) (snd start)
              return False
     | isFree program1 n1 && not (isFree program2 n2) = do
-        tell $ "variable is not free in first expression: "
-        tell $ showHighlighted (==n1) (fst start)
-        tell $ " when compared to second expression: " 
-        tell $ showHighlighted (==n2) (snd start)
-        return False
-    | not (isFree program1 n1) && isFree program2 n2 = do
         tell $ "variable is not free in second expression: "
         tell $ showHighlighted (==n2) (snd start)
-        tell $ " when compared to first expression: " 
+        tell $ " when compared to second expression where it's free: " 
         tell $ showHighlighted (==n1) (fst start)
+        return False
+    | not (isFree program1 n1) && isFree program2 n2 = do
+        tell $ "variable is not free in first expression: "
+        tell $ showHighlighted (==n1) (fst start)
+        tell $ " when compared to second expression where it's free: " 
+        tell $ showHighlighted (==n2) (snd start)
         return False
     | bindingHeight program1 n1 == bindingHeight program2 n2 = return True
     | otherwise = do
@@ -693,36 +693,24 @@ spec_alphaEquivalent = describe "alphaEquivalent" $ do
 
 
 
-substitute :: Monad m => ProgramNode -> (Name, ProgramNode) -> ProgramT m ProgramNode
-substitute v@(vn, Variable name1) (name2, n@(nn, _))
+substitute :: Monad m => ProgramNode -> (Name, ProgramT m ProgramNode) -> ProgramT m ProgramNode
+substitute v@(vn, Variable name1) (name2, nM)
     | name1 == name2 = do
-       program <- get
        modify $ delNode vn
-       if length (inn program nn) == 0
-          then return n
-          else copy' program n
+       nM
     | otherwise = return v
-substitute (an, App) (name, n@(nn, _)) = do
+substitute (an, App) (name, nM) = do
     program <- get
     modify $ delNode an
 
-    if length (inn program nn) == 0
-       then do
-           funSub <- function program an `substitute` (name `with` n)
-           newN <- copy' program n
-           argSub <- argument program an `substitute` (name `with` newN)
-           app funSub argSub
-       else do
-           newN1 <- copy' program n
-           funSub <- function program an `substitute` (name `with` newN1)
-           newN2 <- copy' program n
-           argSub <- argument program an `substitute` (name `with` newN2)
-           app funSub argSub
-substitute l@(ln, Lambda name1) (name2, m)
+    fun <- function program an `substitute` (name `with` nM)
+    arg <- argument program an `substitute` (name `with` nM)
+    app fun arg
+substitute l@(ln, Lambda name1) (name2, nM)
     | name1 == name2 = return l
     | otherwise = do
+        newBody <- get >>= \p -> body p ln `substitute` (name2 `with` nM)
         program <- get
-        newBody <- body program ln `substitute` (name2 `with` m)
         let freeVariables = map (\n -> variableName program n) $ filter (\n -> isFree program n) $ bfs (fst newBody) program
         let newName = case find (==name1) freeVariables of
                         Just _ -> head $ dropWhile (\name -> name `elem` freeVariables) variableNames
@@ -744,26 +732,22 @@ spec_substitute = describe "substitute" $ do
     it "should satisfy x[x := n] = n" $ do
         got <- buildProgramT $ do
             x <- variable "x"
-            n <- variable "n"
-            x `substitute` ("x" `with` n)
-        expected <- buildProgramT $ do
-            variable "n"
+            x `substitute` ("x" `with` variable "n")
+        expected <- buildProgramT $ variable "n"
 
         got `shouldBe` expected
         (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
         (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
     it "should satisfy y[x := n] = y" $ runProgramT $ do
         y <- variable "y"
-        n <- variable "n"
-        m <- y `substitute` ("x" `with` n)
+        m <- y `substitute` ("x" `with` variable "n")
         lift $ m `shouldBe` y
     it "should substitute (x x)[x := n] = (n n)" $ do
         got <- buildProgramT $ do
             x1 <- variable "x"
             x2 <- variable "x"
             a <- app x1 x2
-            n <- variable "n"
-            a `substitute` ("x" `with` n)
+            a `substitute` ("x" `with` variable "n")
         expected <- buildProgramT $ do
             n1 <- variable "n"
             n2 <- variable "n"
@@ -776,91 +760,75 @@ spec_substitute = describe "substitute" $ do
             x <- variable "x"
             y <- variable "y"
             a <- app x y
-            n <- variable "n"
-            a `substitute` ("x" `with` n)
+            a `substitute` ("x" `with` variable "n")
         expected <- buildProgramT $ do
             n <- variable "n"
             y <- variable "y"
             app n y
-        --prettyPrint (exprProgram got)
-        --prettyPrint (exprProgram expected)
-
         got `shouldBe` expected
-        --(length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
-        --(length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
-    it "should substitute (x y)[z := n] = (x y)" $ do
-        got <- buildProgramT $ do
-            x <- variable "x"
-            y <- variable "y"
-            a <- app x y
-            n <- variable "n"
-            a `substitute` ("z" `with` n)
-        expected <- buildProgramT $ do
-            x <- variable "x"
-            y <- variable "y"
-            app x y
-        --prettyPrint (exprProgram got)
-        --prettyPrint (exprProgram expected)
-
-        got `shouldBe` expected
-        --(length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
-        --(length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
     it "should substitute (a b)[x := c] = (a b)" $ do
         lhs <- buildProgramT $ do
             fun <- variable "a"
             arg <- variable "b"
             a <- app fun arg
-            c <- variable "c"
-            a `substitute` ("x" `with` c)
+            a `substitute` ("x" `with` variable "c")
         rhs <- buildProgramT $ do
             fun <- variable "a"
             arg <- variable "b"
             app fun arg
         lhs `shouldBe` rhs
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
     it "should substitute (λy.x)[x := n] = λy.n" $ do
         lhs <- buildProgramT $ do
             x <- variable "x"
-            n <- variable "n"
             l <- lambda "y" x
-            l `substitute` ("x" `with` n)
+            l `substitute` ("x" `with` variable "n")
         rhs <- buildProgramT $ do
             n <- variable "n"
             lambda "y" n
         lhs `shouldBe` rhs
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
     it "should substitute (λz.x x)[x := n] alpha-equivalently (λz.n n)" $ do
         lhs <- buildProgramT $ do
             x1 <- variable "x"
             x2 <- variable "x"
             l <- lambda "z" =<< app x1 x2
-            n <- variable "n"
-            l `substitute` ("x" `with` n)
+            l `substitute` ("x" `with` variable "n")
         rhs <- buildProgramT $ do
             n1 <- variable "n"
             n2 <- variable "n"
             lambda "z" =<< app n1 n2
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
     it "should make (λy.y)[x := u] alpha-equivalent with (λy.y)" $ do
         lhs <- buildProgramT $ do
             l <- lambda "y" =<< variable "y"
-            u <- variable "u"
-            l `substitute` ("x" `with` u)
+            l `substitute` ("x" `with` variable "u")
         rhs <- buildProgramT $ do
             lambda "y" =<< variable "y"
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
     it "should make ((λv.v) z)[x := u] alpha-equivalent with ((λv.v) z)" $ do
         lhs <- buildProgramT $ do
             fun <- lambda "v" =<< variable "v"
             arg <- variable "z"
             a <- app fun arg
 
-            u <- variable "u"
-            a `substitute` ("x" `with` u)
+            a `substitute` ("x" `with` variable "u")
         rhs <- buildProgramT $ do
             fun <- lambda "v" =<< variable "v"
             arg <- variable "z"
             app fun arg
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
     it "should make (u (λy.(v y)))[x := (λx.(λv.v))] alpha-equivalently with itself" $ do
         lhs <- buildProgramT $ do
             fun <- variable "u"
@@ -869,9 +837,7 @@ spec_substitute = describe "substitute" $ do
                 y <- variable "y"
                 app v y
             a <- app fun arg
-
-            n <- lambda "x" =<< lambda "v" =<< variable "v"
-            a `substitute` ("x" `with` n)
+            a `substitute` ("x" `with` (lambda "x" =<< lambda "v" =<< variable "v"))
         rhs <- buildProgramT $ do
             fun <- variable "u"
             arg <- lambda "y" =<< do
@@ -880,6 +846,8 @@ spec_substitute = describe "substitute" $ do
                 app v y
             app fun arg
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
     it "should make (u (λy.v))[x := u] alpha-equivalently with itself" $ do
         lhs <- buildProgramT $ do
             fun <- variable "u"
@@ -889,8 +857,7 @@ spec_substitute = describe "substitute" $ do
                 app v y
             a <- app fun arg
 
-            u <- variable "u"
-            a `substitute` ("x" `with` u)
+            a `substitute` ("x" `with` variable "u")
         rhs <- buildProgramT $ do
             fun <- variable "u"
             arg <- lambda "y" =<< do
@@ -899,27 +866,30 @@ spec_substitute = describe "substitute" $ do
                 app v y
             app fun arg
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
     it "should substitute (λx.y)[y := x] alpha-equivalently to λz.x" $ do
         lhs <- buildProgramT $ do
             y <- variable "y"
             l <- lambda "x" y
-            x <- variable "x"
-            l `substitute` ("y" `with` x)
+            l `substitute` ("y" `with` variable "x")
         rhs <- buildProgramT $ do
             x <- variable "x"
             lambda "z" x
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
     it "should substitute (λy.x)[x := (u (w y))] alpha-equivalently to λz.(u (w y))" $ do
         lhs <- buildProgramT $ do
             l <- lambda "y" =<< variable "x"
-            n <- do
+            let nM = do
                 fun <- variable "u"
                 arg <- do
                     w <- variable "w"
                     y <- variable "y"
                     app w y
                 app fun arg
-            l `substitute` ("x" `with` n)
+            l `substitute` ("x" `with` nM)
         rhs <- buildProgramT $ do
             lambda "z" =<< do
                 fun <- variable "u"
@@ -929,6 +899,8 @@ spec_substitute = describe "substitute" $ do
                     app w y
                 app fun arg
         lhs `alphaEquivalent'` rhs `shouldBe` AlphaEquivalent
+        (length . nodes $ exprProgram lhs) `shouldBe` (length . nodes $ exprProgram rhs)
+        (length . edges $ exprProgram lhs) `shouldBe` (length . edges $ exprProgram rhs)
 
     it "should substitute (m1 m2)[x := n] = (m1[x := n] m2[x := n]), where m1,m2,n are arbitrary lambda expressions" $ property $
         prop_substitute_app
@@ -944,18 +916,15 @@ prop_substitute_app m1 m2 nM = (function' asub) `alphaEquivalent` m1sub && (argu
         asub = buildProgram $ do
                 fun <- m1
                 arg <- m2
-                n <- nM
                 a <- app fun arg
-                a `substitute` ("x" `with` n)
+                a `substitute` ("x" `with` nM)
 
         m1sub = buildProgram $ do
-                n <- nM
                 fun <- m1
-                fun `substitute` ("x" `with` n)
+                fun `substitute` ("x" `with` nM)
         m2sub = buildProgram $ do
-                n <- nM
                 arg <- m2
-                arg `substitute` ("x" `with` n)
+                arg `substitute` ("x" `with` nM)
 
 prop_substitute_lambda_same_variable :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
 prop_substitute_lambda_same_variable m1 nM = unsub == sub
@@ -963,20 +932,17 @@ prop_substitute_lambda_same_variable m1 nM = unsub == sub
         unsub = buildProgram $ lambda "x" =<< m1
         sub = buildProgram $ do
             l <- lambda "x" =<< m1
-            n <- nM
-            l `substitute` ("x" `with` n)
+            l `substitute` ("x" `with` nM)
 
 prop_substitute_lambda_different_variable :: ProgramT Identity ProgramNode -> YIsFreeProgramNode Identity -> Bool
 prop_substitute_lambda_different_variable m1M (YIsFreeProgramNode nM) = lhs `alphaEquivalent` rhs
     where
         lhs = buildProgram $ do
             l <- lambda "y" =<< m1M
-            n <- nM
-            l `substitute` ("x" `with` n)
+            l `substitute` ("x" `with` nM)
         rhs = buildProgram $ do
             m1 <- m1M
-            n <- nM
-            m1sub <- m1 `substitute` ("x" `with` n)
+            m1sub <- m1 `substitute` ("x" `with` nM)
             lambda "y" m1sub
 
 main :: IO ()
