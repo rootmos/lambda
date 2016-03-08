@@ -1041,7 +1041,7 @@ spec_betaReduce = describe "betaReduce" $ do
         prop_beta_reduce
 
 prop_beta_reduce :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
-prop_beta_reduce mM nM = lhs `alphaEquivalent` rhs
+prop_beta_reduce mM nM = lhs `alphaEquivalent` rhs && nodeCountTest && edgeCountTest
     where
         lhs = buildProgram $ betaReduce =<< do
             fun <- lambda "x" =<< mM
@@ -1050,6 +1050,8 @@ prop_beta_reduce mM nM = lhs `alphaEquivalent` rhs
         rhs = buildProgram $ do
             m <- mM
             m `substitute` ("x" `with` nM)
+        nodeCountTest = (length . nodes $ exprProgram lhs) == (length . nodes $ exprProgram rhs)
+        edgeCountTest = (length . edges $ exprProgram lhs) == (length . edges $ exprProgram rhs)
 
 
 main :: IO ()
