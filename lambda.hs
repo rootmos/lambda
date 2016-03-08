@@ -8,7 +8,7 @@ import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 import Debug.Trace
-import Data.List
+import Data.List (find)
 
 type Name = String
 
@@ -552,13 +552,13 @@ alphaEquivalentWriter start (Expr (n1, Variable name1) program1) (Expr (n2, Vari
     | isFree program1 n1 && not (isFree program2 n2) = do
         tell $ "variable is not free in second expression: "
         tell $ showHighlighted (==n2) (snd start)
-        tell $ " when compared to second expression where it's free: " 
+        tell $ " when compared to second expression where it's free: "
         tell $ showHighlighted (==n1) (fst start)
         return False
     | not (isFree program1 n1) && isFree program2 n2 = do
         tell $ "variable is not free in first expression: "
         tell $ showHighlighted (==n1) (fst start)
-        tell $ " when compared to second expression where it's free: " 
+        tell $ " when compared to second expression where it's free: "
         tell $ showHighlighted (==n2) (snd start)
         return False
     | bindingHeight program1 n1 == bindingHeight program2 n2 = return True
@@ -945,6 +945,113 @@ prop_substitute_lambda_different_variable m1M (YIsFreeProgramNode nM) = lhs `alp
             m1sub <- m1 `substitute` ("x" `with` nM)
             lambda "y" m1sub
 
+betaReduce :: Monad m => ProgramNode -> ProgramT m ProgramNode
+betaReduce v@(_, Variable _) = return v
+betaReduce l@(_, Lambda _) = return l
+betaReduce a@(an, App) = do
+   program <- get
+   case function program an of
+     (ln, Lambda name) -> do
+        let arg = (argument program an)
+        result <- (body program ln) `substitute` (name `with` copy' program arg)
+        delete arg
+        modify $ delNode ln
+        modify $ delNode an
+        return result
+     _ -> return a
+
+delete :: Monad m => ProgramNode -> ProgramT m ()
+delete (vn, Variable _) = modify $ delNode vn
+delete (ln, Lambda _) = do
+    program <- get
+    delete (body program ln)
+    modify $ delNode ln
+delete (an, App) = do
+    program <- get
+    delete (function program an)
+    delete (argument program an)
+    modify $ delNode an
+
+spec_betaReduce :: SpecWith ()
+spec_betaReduce = describe "betaReduce" $ do
+    it "should not do anything to a variable" $ do
+        got <- buildProgramT $ betaReduce =<< variable "x"
+        expected <- buildProgramT $ variable "x"
+        got `shouldBe` expected
+    it "should not do anything to a lambda" $ do
+        got <- buildProgramT $ betaReduce =<< lambda "x" =<< variable "x"
+        expected <- buildProgramT $ lambda "x" =<< variable "x"
+        got `shouldBe` expected
+    it "should not reduce (x y)" $ do
+        got <- buildProgramT $ betaReduce =<< do
+            fun <- variable "x"
+            arg <- variable "y"
+            app fun arg
+        expected <- buildProgramT $ do
+            fun <- variable "x"
+            arg <- variable "y"
+            app fun arg
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should not reduce ((x y) z)" $ do
+        got <- buildProgramT $ betaReduce =<< do
+            fun <- do
+                fun <- variable "x"
+                arg <- variable "y"
+                app fun arg
+            arg <- variable "z"
+            app fun arg
+        expected <- buildProgramT $ do
+            fun <- do
+                fun <- variable "x"
+                arg <- variable "y"
+                app fun arg
+            arg <- variable "z"
+            app fun arg
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should reduce ((λx.x) y) to y" $ do
+        got <- buildProgramT $ betaReduce =<< do
+            fun <- lambda "x" =<< variable "x"
+            arg <- variable "y"
+            app fun arg
+        expected <- buildProgramT $ variable "y"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should reduce ((λx.x) (λy.y)) to (λy.y)" $ do
+        got <- buildProgramT $ betaReduce =<< do
+            fun <- lambda "x" =<< variable "x"
+            arg <- lambda "y" =<< variable "y"
+            app fun arg
+        expected <- buildProgramT $ lambda "y" =<< variable "y"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should reduce ((λz.x) y) to x" $ do
+        got <- buildProgramT $ betaReduce =<< do
+            fun <- lambda "z" =<< variable "x"
+            arg <- variable "y"
+            app fun arg
+        expected <- buildProgramT $ variable "x"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should satisfy: ((λx.M) N) beta-reduces alpha-equivalently to M[x := N], where M,N are arbitrary lambda expressions" $ property $ do
+        prop_beta_reduce
+
+prop_beta_reduce :: ProgramT Identity ProgramNode -> ProgramT Identity ProgramNode -> Bool
+prop_beta_reduce mM nM = lhs `alphaEquivalent` rhs
+    where
+        lhs = buildProgram $ betaReduce =<< do
+            fun <- lambda "x" =<< mM
+            arg <- nM
+            app fun arg
+        rhs = buildProgram $ do
+            m <- mM
+            m `substitute` ("x" `with` nM)
+
+
 main :: IO ()
 main = hspec $ do
     spec_variable
@@ -958,3 +1065,4 @@ main = hspec $ do
     spec_Expr_Show_instance
     spec_Expr_Eq_instance
     spec_copy
+    spec_betaReduce
