@@ -419,6 +419,51 @@ spec_free = describe "free" $ do
         expr <- get
         lift $ free expr `shouldBe` [x]
 
+free' :: Expr -> [ProgramNode]
+free' (Expr { exprNode = node, exprProgram = program }) = freeWalker [] node
+    where
+        freeWalker binds v@(_, Variable name)
+            | name `notElem` binds = [v] 
+            | otherwise = []
+        freeWalker binds (ln, Lambda name) = freeWalker (name:binds) (body program ln)
+        freeWalker binds (an, App) = (freeWalker binds (function program an)) ++ (freeWalker binds (argument program an))
+
+mkExpr :: Monad m => ProgramNode -> ProgramT m Expr
+mkExpr node = do
+    program <- get
+    return $ Expr node program
+
+spec_free' :: SpecWith ()
+spec_free' = describe "free'" $ do
+    it "claims x is free in: x" $ runProgramT $ do
+        x <- variable "x"
+        expr <- mkExpr x
+        lift $ free' expr `shouldBe` [x]
+    it "claims x is free in: λx.<<x>>" $ runProgramT $ do
+        x <- variable "x"
+        _ <- lambda "x" x
+        expr <- mkExpr x
+        lift $ free' expr `shouldBe` [x]
+    it "claims y is free in: λx.y" $ runProgramT $ do
+        y <- variable "y"
+        expr <- mkExpr =<< lambda "x" y
+        lift $ free' expr `shouldBe` [y]
+    it "claims nothing is free in: λx.x" $ runProgramT $ do
+        expr <- mkExpr =<< lambda "x" =<< variable "x"
+        lift $ free' expr `shouldBe` []
+    it "claims [x, y] are free in: (x y)" $ runProgramT $ do
+        x <- variable "x"
+        y <- variable "y"
+        expr <- mkExpr =<< app x y
+        lift $ free' expr `shouldMatchList` [x, y]
+    it "claims both xs are free in: λy.((x y) x)" $ runProgramT $ do
+        x1 <- variable "x"
+        x2 <- variable "x"
+        y <- variable "y"
+        fun <- app x1 y
+        expr <- mkExpr =<< lambda "y" =<< app fun x2
+        lift $ free' expr `shouldMatchList` [x1, x2]
+
 variableName :: Program -> Node -> Name
 variableName expr n = let (Variable name) = lab' $ context expr n
                        in name
@@ -1053,6 +1098,104 @@ prop_beta_reduce mM nM = lhs `alphaEquivalent` rhs && nodeCountTest && edgeCount
         nodeCountTest = (length . nodes $ exprProgram lhs) == (length . nodes $ exprProgram rhs)
         edgeCountTest = (length . edges $ exprProgram lhs) == (length . edges $ exprProgram rhs)
 
+etaReduce :: Monad m => ProgramNode -> ProgramT m ProgramNode
+etaReduce v@(_, Variable _) = return v
+etaReduce a@(_, App) = return a
+etaReduce l@(ln, Lambda name) = do
+    program <- get
+    case theApp program >>= checkTheArgument program >>= checkThatVariableIsFree program of
+      Just (an, App) -> do
+         result <- copy' program (function program an)
+         delete l
+         return result
+      _ -> return l
+    where
+        theApp :: Program -> Maybe ProgramNode
+        theApp p = case body p ln of
+                      a@(_, App) -> Just a
+                      _ -> Nothing
+
+        checkTheArgument :: Program -> ProgramNode -> Maybe ProgramNode
+        checkTheArgument p a@(an, App) = case argument p an of
+                                           (_, Variable name2) -> if name == name2 then Just a
+                                                                                   else Nothing
+                                           _ -> Nothing
+        checkTheArgument _ _ = error "Programming error!"
+
+        checkThatVariableIsFree :: Program -> ProgramNode -> Maybe ProgramNode
+        checkThatVariableIsFree p a@(an, App) =
+            if name `notElem` freeVariablesInFunction then Just a
+                                                      else Nothing
+                where
+                    freeVariablesInFunction = map (\(n, _) -> variableName p n) $ free' (Expr (function p an) p)
+        checkThatVariableIsFree _ _ = error "Programming error!"
+
+spec_etaReduce :: SpecWith ()
+spec_etaReduce = describe "etaReduce" $ do
+    it "should not do anything to a variable" $ do
+        got <- buildProgramT $ etaReduce =<< variable "x"
+        expected <- buildProgramT $ variable "x"
+        got `shouldBe` expected
+    it "should not do anything to an application" $ do
+        got <- buildProgramT $ etaReduce =<< do
+            fun <- variable "x"
+            arg <- variable "y"
+            app fun arg
+        expected <- buildProgramT $ do
+            fun <- variable "x"
+            arg <- variable "y"
+            app fun arg
+        got `shouldBe` expected
+    it "should not reduce λx.y" $ do
+        got <- buildProgramT $ etaReduce =<< lambda "x" =<< variable "y"
+        expected <- buildProgramT $ lambda "x" =<< variable "y"
+        got `shouldBe` expected
+    it "should not reduce λx.λy.z" $ do
+        got <- buildProgramT $ etaReduce =<< lambda "x" =<< lambda "y" =<< variable "z"
+        expected <- buildProgramT $ lambda "x" =<< lambda "y" =<< variable "z"
+        got `shouldBe` expected
+    it "should not reduce λx.(y z)" $ do
+        got <- buildProgramT $ etaReduce =<< lambda "x" =<< do
+            fun <- variable "y"
+            arg <- variable "z"
+            app fun arg
+        expected <- buildProgramT $ lambda "x" =<< do
+            fun <- variable "y"
+            arg <- variable "z"
+            app fun arg
+        got `shouldBe` expected
+    it "should not reduce λx.(x x)" $ do
+        got <- buildProgramT $ etaReduce =<< lambda "x" =<< do
+            fun <- variable "x"
+            arg <- variable "x"
+            app fun arg
+        expected <- buildProgramT $ lambda "x" =<< do
+            fun <- variable "x"
+            arg <- variable "x"
+            app fun arg
+        got `shouldBe` expected
+    it "should reduce λx.(y x) to y" $ do
+        got <- buildProgramT $ etaReduce =<< lambda "x" =<< do
+            fun <- variable "y"
+            arg <- variable "x"
+            app fun arg
+        expected <- buildProgramT $ variable "y"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should reduce λy.(M y) to M when M is an arbitrary lambda expression in which y is free" $ property $
+        prop_eta_reduce
+
+prop_eta_reduce :: YIsFreeProgramNode Identity -> Bool
+prop_eta_reduce (YIsFreeProgramNode mM) = lhs `alphaEquivalent` rhs && nodeCountTest && edgeCountTest
+    where
+        lhs = buildProgram $ etaReduce =<< lambda "y" =<< do
+            fun <- mM
+            arg <- variable "y"
+            app fun arg
+        rhs = buildProgram mM
+        nodeCountTest = (length . nodes $ exprProgram lhs) == (length . nodes $ exprProgram rhs)
+        edgeCountTest = (length . edges $ exprProgram lhs) == (length . edges $ exprProgram rhs)
 
 main :: IO ()
 main = hspec $ do
@@ -1062,9 +1205,11 @@ main = hspec $ do
     spec_parent
     spec_parents
     spec_free
+    spec_free'
     spec_alphaEquivalent
     spec_substitute
     spec_Expr_Show_instance
     spec_Expr_Eq_instance
     spec_copy
     spec_betaReduce
+    spec_etaReduce
