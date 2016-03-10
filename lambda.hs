@@ -30,6 +30,9 @@ newtype ProgramT m a = ProgramT {unProgramT :: StateT Program m a}
 
 data Expr = Expr { exprNode :: ProgramNode, exprProgram :: Program }
 
+instance Ord Expr where
+    e1 `compare` e2 = measure e1 `compare` measure e2
+
 instance Monad m => Arbitrary (ProgramT m ProgramNode) where
     arbitrary = sized genProgram
 
@@ -138,7 +141,6 @@ instance Eq Expr where
             pathifier (_, Variable name) _ = Variable name : []
             pathifier (n, Lambda name) p = Lambda name : pathifier (body p n) p
             pathifier (n, App) p = App : (pathifier (function p n) p ++ pathifier (function p n) p)
-                --bfsWith (\c -> (sort (map edgeLabel $ out' c), lab' c)) n p
 
 spec_Expr_Eq_instance :: SpecWith ()
 spec_Expr_Eq_instance = describe "Expr's Eq instance" $ do
@@ -159,8 +161,6 @@ spec_Expr_Eq_instance = describe "Expr's Eq instance" $ do
             return x
         p2 <- buildProgramT $ variable "x"
         p1 `shouldBe` p2
-
-
 
 
 variable :: Monad m => Name -> ProgramT m ProgramNode
@@ -1197,6 +1197,54 @@ prop_eta_reduce (YIsFreeProgramNode mM) = lhs `alphaEquivalent` rhs && nodeCount
         nodeCountTest = (length . nodes $ exprProgram lhs) == (length . nodes $ exprProgram rhs)
         edgeCountTest = (length . edges $ exprProgram lhs) == (length . edges $ exprProgram rhs)
 
+data Complexity = Complexity { complexityNodes :: Int, complexityDegreesOfFreedom :: Int }
+    deriving (Eq, Ord, Show)
+
+instance Monoid Complexity where
+    mempty = Complexity 0 0
+    mappend (Complexity { complexityNodes = n1, complexityDegreesOfFreedom = d1 })
+            (Complexity { complexityNodes = n2, complexityDegreesOfFreedom = d2 })
+            = Complexity (n1 + n2) (d1 + d2)
+
+measure :: Expr -> Complexity
+measure Expr { exprNode = (_, Variable _) } = Complexity 1 1
+measure expr @ Expr { exprNode = (ln, Lambda _) } = Complexity 1 (length $ free' expr) <> measure bodyExpr
+    where
+        bodyExpr = expr { exprNode = body (exprProgram expr) ln }
+measure expr @ Expr { exprNode = (an, App) } = Complexity 1 (length $ free' expr) <> measure funExpr <> measure argExpr
+    where
+        funExpr = expr { exprNode = function (exprProgram expr) an }
+        argExpr = expr { exprNode = argument (exprProgram expr) an }
+
+spec_measure :: SpecWith ()
+spec_measure = describe "measure" $ do
+    it "should consider x to be equally complex compared to y" $ do
+        lhs <- buildProgramT $ variable "x"
+        rhs <- buildProgramT $ variable "y"
+        measure lhs `compare` measure rhs `shouldBe` EQ
+    it "should consider λx.x to be more complex than x" $ do
+        lhs <- buildProgramT $ lambda "x" =<< variable "x"
+        rhs <- buildProgramT $ variable "x"
+        measure lhs `compare` measure rhs `shouldBe` GT
+    it "should consider (x y) to be more complex than λx.x" $ do
+        lhs <- buildProgramT $ do
+            x <- variable "x"
+            y <- variable "y"
+            app x y
+        rhs <- buildProgramT $ lambda "x" =<< variable "x"
+        measure lhs `compare` measure rhs `shouldBe` GT
+    it "should consider λx.y to be more complex than λx.x" $ do
+        lhs <- buildProgramT $ lambda "x" =<< variable "y"
+        rhs <- buildProgramT $ lambda "x" =<< variable "x"
+        measure lhs `compare` measure rhs `shouldBe` GT
+    it "should consider (x y) to be more complex than λx.λy.z" $ do
+        lhs <- buildProgramT $ do
+            x <- variable "x"
+            y <- variable "y"
+            app x y
+        rhs <- buildProgramT $ lambda "x" =<< lambda "y" =<< variable "z"
+        measure lhs `compare` measure rhs `shouldBe` GT
+
 main :: IO ()
 main = hspec $ do
     spec_variable
@@ -1213,3 +1261,4 @@ main = hspec $ do
     spec_copy
     spec_betaReduce
     spec_etaReduce
+    spec_measure
