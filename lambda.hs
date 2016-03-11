@@ -1301,6 +1301,23 @@ spec_simplify = describe "simplify" $ do
         (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
         (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
 
+    -- https://en.wikipedia.org/wiki/Normalization_property_(abstract_rewriting)#Untyped_lambda_calculus
+    it "should not apply beta reduce when it becomes more complex: ((λx.(x x) x) (λx.(x x) x)) should not be simplified" $ do
+        complexExpression <- buildProgramT $ do
+            let innerExpressionM = lambda "x" =<< do
+                fun1 <- do
+                    fun2 <- variable "x"
+                    arg2 <- variable "x"
+                    app fun2 arg2
+                arg1 <- variable "x"
+                app fun1 arg1
+
+            innerExpression1 <- innerExpressionM
+            innerExpression2 <- innerExpressionM
+            app innerExpression1 innerExpression2
+
+        simplify complexExpression `shouldBe` complexExpression
+
 main :: IO ()
 main = hspec $ do
     spec_variable
