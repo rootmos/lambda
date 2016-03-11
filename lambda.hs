@@ -1245,6 +1245,62 @@ spec_measure = describe "measure" $ do
         rhs <- buildProgramT $ lambda "x" =<< lambda "y" =<< variable "z"
         measure lhs `compare` measure rhs `shouldBe` GT
 
+simplify :: Expr -> Expr
+simplify expr = case find simpler candidates of
+                  Just reduced -> simplify reduced
+                  Nothing -> expr
+    where
+        simpler canditade = measure canditade < originalComplexity
+        originalComplexity = measure expr
+        candidates = [tryEtaReduction, tryBetaReduction]
+        tryBetaReduction = buildProgram $ saveAndReturn expr >>= betaReduce
+        tryEtaReduction = buildProgram $ saveAndReturn expr >>= etaReduce
+
+spec_simplify :: SpecWith ()
+spec_simplify = describe "simplify" $ do
+    it "should beta reduce when it can: ((λx.x) y) to y" $ do
+        got <- liftM simplify . buildProgramT $ do
+            fun <- lambda "x" =<< variable "x"
+            arg <- variable "y"
+            app fun arg
+        expected <- buildProgramT $ variable "y"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should eta reduce when it can: λx.(y x) to y" $ do
+        got <- liftM simplify . buildProgramT $ lambda "x" =<< do
+            fun <- variable "y"
+            arg <- variable "x"
+            app fun arg
+        expected <- buildProgramT $ variable "y"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should do first beta reduction and then eta reduction: ((λx.x) (λx.(y x))) to y" $ do
+        got <- liftM simplify . buildProgramT $ do
+            fun1 <- lambda "x" =<< variable "x"
+            arg1 <- lambda "x" =<< do
+                fun2 <- variable "y"
+                arg2 <- variable "x"
+                app fun2 arg2
+            app fun1 arg1
+        expected <- buildProgramT $ variable "y"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should do first eta reduction and then beta reduction: λx.(((λx.x) y) x) to y" $ do
+        got <- liftM simplify . buildProgramT $ lambda "x" =<< do
+            fun <- do
+                fun <- lambda "x" =<< variable "x"
+                arg <- variable "y"
+                app fun arg
+            arg <- variable "x"
+            app fun arg
+        expected <- buildProgramT $ variable "y"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+
 main :: IO ()
 main = hspec $ do
     spec_variable
@@ -1262,3 +1318,4 @@ main = hspec $ do
     spec_betaReduce
     spec_etaReduce
     spec_measure
+    spec_simplify
