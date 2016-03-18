@@ -1,8 +1,9 @@
 GHC_OPTS=-Wall
 
 .PHONY: lambda
-lambda: lambda.hs
+lambda: lambda.hs LambdaParser.hs
 	runhaskell -- $(GHC_OPTS) lambda.hs
+	runhaskell -- $(GHC_OPTS) LambdaParser.hs
 
 .PHONY: deps
 deps:

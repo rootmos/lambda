@@ -12,10 +12,6 @@ import Data.List (find)
 
 type Name = String
 
-data AST = V Name | L Name AST | A AST AST
-    deriving Show
-
-
 data NodeLabel = Variable Name | Lambda Name | App
     deriving (Show, Eq)
 data EdgeLabel = Binding | Body | Function | Argument
@@ -1259,7 +1255,7 @@ simplify expr = case find simpler candidates of
                                                in copy' (exprProgram newBodyExpr) (exprNode newBodyExpr)
                                    modify $ delNode ln
                                    lambda name newBody
-                               (an, App) -> buildProgram $ do
+                               (_, App) -> buildProgram $ do
                                    newFun <- let newFunExpr = simplify $ function' expr
                                               in copy' (exprProgram newFunExpr) (exprNode newFunExpr)
                                    newArg <- let newArgExpr = simplify $ argument' expr
