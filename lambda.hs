@@ -277,6 +277,7 @@ withProgram program = runIdentity . withProgramT program
 copy :: Program -> ProgramNode -> Expr
 copy p pn = buildProgram $ copy' p pn
 
+
 copy' :: Monad m => Program -> ProgramNode -> ProgramT m ProgramNode
 copy' _ (_, Variable name) = variable name
 copy' p (ln, Lambda name) = lambda name =<< copy' p (body p ln)
@@ -482,6 +483,9 @@ isFree expr n = isVariable expr n && case map edgeLabel . out' $ context expr n 
 body :: Program -> Node -> ProgramNode
 body expr node = let [(_, b, Body)] = out expr node
                   in labNode' $ context expr b
+
+body' :: Expr -> Expr
+body' (Expr (n, _) expr) = Expr (body expr n) expr
 
 argument :: Program -> Node -> ProgramNode
 argument expr node = let [(_, a, Argument)] = filter (\(_, _, t) -> t == Argument) $ out expr node
@@ -1248,13 +1252,26 @@ spec_measure = describe "measure" $ do
 simplify :: Expr -> Expr
 simplify expr = case find simpler candidates of
                   Just reduced -> simplify reduced
-                  Nothing -> expr
+                  Nothing -> case exprNode expr of
+                               (_, Variable _) -> expr
+                               (ln, Lambda name) -> buildProgram $ do
+                                   newBody <- let newBodyExpr =  simplify $ body' expr
+                                               in copy' (exprProgram newBodyExpr) (exprNode newBodyExpr)
+                                   modify $ delNode ln
+                                   lambda name newBody
+                               (an, App) -> buildProgram $ do
+                                   newFun <- let newFunExpr = simplify $ function' expr
+                                              in copy' (exprProgram newFunExpr) (exprNode newFunExpr)
+                                   newArg <- let newArgExpr = simplify $ argument' expr
+                                               in copy' (exprProgram newArgExpr) (exprNode newArgExpr)
+                                   app newFun newArg
+
     where
-        simpler canditade = measure canditade < originalComplexity
+        simpler candidate = measure candidate < originalComplexity
         originalComplexity = measure expr
         candidates = [tryEtaReduction, tryBetaReduction]
         tryBetaReduction = buildProgram $ saveAndReturn expr >>= betaReduce
-        tryEtaReduction = buildProgram $ saveAndReturn expr >>= etaReduce
+        tryEtaReduction  = buildProgram $ saveAndReturn expr >>= etaReduce
 
 spec_simplify :: SpecWith ()
 spec_simplify = describe "simplify" $ do
@@ -1317,6 +1334,32 @@ spec_simplify = describe "simplify" $ do
             app innerExpression1 innerExpression2
 
         simplify complexExpression `shouldBe` complexExpression
+
+    it "should recurse when not possible to simplify top-level expression: λz.((λx.x) y) to λz.y" $ do
+        got <- liftM simplify . buildProgramT $ lambda "z" =<< do
+            fun <- lambda "x" =<< variable "x"
+            arg <- variable "y"
+            app fun arg
+        expected <- buildProgramT $ lambda "z" =<< variable "y"
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should recurse when not possible to simplify top-level expression: (((λx.x) y) x) to (y x)" $ do
+        got <- liftM simplify . buildProgramT $ do
+            fun1 <- do
+                fun2 <- lambda "x" =<< variable "x"
+                arg2 <- variable "y"
+                app fun2 arg2
+            arg1 <- variable "x"
+            app fun1 arg1
+        expected <- buildProgramT $ do
+            fun <- variable "y"
+            arg <- variable "x"
+            app fun arg
+        got `shouldBe` expected
+        (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
+        (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+
 
 main :: IO ()
 main = hspec $ do
