@@ -1355,6 +1355,7 @@ spec_simplify = describe "simplify" $ do
         (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
         (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
 
+
 fromAST :: AST -> Expr
 fromAST = buildProgram . fromAST'
 
@@ -1381,6 +1382,17 @@ spec_fromAST = describe "fromAST" $ do
                 app x y)
 
 
+toAST :: Expr -> AST
+toAST Expr { exprNode = (_, Variable name) } = V name
+toAST expr @ Expr { exprNode = (_, Lambda name) } = L name (toAST $ body' expr)
+toAST expr @ Expr { exprNode = (_, App) } = A (toAST $ function' expr) (toAST $ argument' expr)
+
+spec_toAST :: SpecWith ()
+spec_toAST = describe "toAST" $ do
+    it "should satisify fromAST . toAST = id" $ property $
+        \e -> (fromAST . toAST $ e) == e
+
+
 main :: IO ()
 main = hspec $ do
     spec_variable
@@ -1400,3 +1412,4 @@ main = hspec $ do
     spec_measure
     spec_simplify
     spec_fromAST
+    spec_toAST
