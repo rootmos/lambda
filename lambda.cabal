@@ -8,7 +8,8 @@ build-type:       Simple
 cabal-version:    >= 1.8
 
 library
-  exposed-modules: Lambda, LambdaParser, LambdaREPL
+  exposed-modules: Data.Lambda, Data.Lambda.Parser, Data.Lambda.REPL
+  other-modules: Data.Lambda.Internal
   ghc-options: -Wall
   hs-source-dirs: src
   build-depends: base, fgl, mtl, parsec, QuickCheck, readline
@@ -22,6 +23,6 @@ executable lambda
 test-suite spec
   type: exitcode-stdio-1.0
   ghc-options: -Wall
-  hs-source-dirs: test
+  hs-source-dirs: test, src
   main-is: Spec.hs
-  build-depends: base, fgl, mtl, lambda, hspec, QuickCheck
+  build-depends: base, fgl, mtl, lambda, hspec, QuickCheck, parsec, readline

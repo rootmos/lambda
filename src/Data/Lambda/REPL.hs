@@ -1,7 +1,7 @@
-module LambdaREPL (runREPL) where
+module Data.Lambda.REPL (runREPL) where
 
-import Lambda
-import LambdaParser
+import Data.Lambda
+import Data.Lambda.Parser
 import System.Console.Readline
 
 runREPL :: IO ()

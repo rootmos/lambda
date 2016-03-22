@@ -3,8 +3,8 @@ module LambdaSpec (spec) where
 import Data.Graph.Inductive
 import Control.Monad.Identity
 import Control.Monad.State
-import Lambda
-import LambdaParser
+import Data.Lambda.Internal
+import Data.Lambda.Parser
 import Test.Hspec hiding (context)
 import Test.QuickCheck
 

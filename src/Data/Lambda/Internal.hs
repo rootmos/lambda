@@ -1,12 +1,12 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving, FlexibleInstances #-}
-module Lambda where
+module Data.Lambda.Internal where
 
 import Data.Graph.Inductive
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
 import Data.List (find)
-import LambdaParser
+import Data.Lambda.Parser
 import Test.QuickCheck
 
 data NodeLabel = Variable Name | Lambda Name | App | Root

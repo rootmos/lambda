@@ -1,6 +1,6 @@
 module Main where
 
-import LambdaREPL
+import Data.Lambda.REPL
 
 main :: IO ()
 main = runREPL

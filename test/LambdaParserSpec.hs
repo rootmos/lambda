@@ -1,6 +1,6 @@
 module LambdaParserSpec (spec) where
 
-import LambdaParser
+import Data.Lambda.Parser
 import Test.Hspec
 import Data.Either
 

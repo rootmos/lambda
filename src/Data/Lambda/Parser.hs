@@ -1,5 +1,5 @@
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
-module LambdaParser (AST(..), Name, parseLambda) where
+module Data.Lambda.Parser (AST(..), Name, parseLambda) where
 
 import Text.Parsec
 import qualified Text.Parsec.Token as P
