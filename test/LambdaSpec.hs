@@ -930,6 +930,8 @@ spec_fromAST = describe "fromAST" $ do
                 x <- variable "x"
                 y <- variable "y"
                 app x y)
+    it "should convert (D foo (V x))" $ do
+        fromAST (D "foo" (V "x")) `shouldBe` buildProgram (def "foo" =<< variable "x")
 
 spec_toAST :: SpecWith ()
 spec_toAST = describe "toAST" $ do
