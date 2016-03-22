@@ -548,6 +548,7 @@ fromAST' (A funAST argAST) = do
          fun <- fromAST' funAST
          arg <- fromAST' argAST
          app fun arg
+fromAST' (D _ _) = error "Not implemented!"
 
 
 toAST :: Expr -> AST
