@@ -156,21 +156,26 @@ app fun arg = ProgramT $ do
     modify $ insEdge (fst appNode, fst arg, Argument)
     return appNode
 
-def :: Monad m => Name -> ProgramNode -> ProgramT m ()
-def name (targetNode, _) = findRoot >>= \(root, _) -> ProgramT $ do
-    modify $ insEdge (root, targetNode, Def name)
-    return ()
-
-maybeRoot :: Monad m => ProgramT m (Maybe ProgramNode)
-maybeRoot = ProgramT $ do
+def :: Monad m => Name -> ProgramNode -> ProgramT m ProgramNode
+def name1 target@(targetNode, _) = findRoot >>= \(root, _) -> ProgramT $ do
     program <- get
-    return $ case filter (\(_, t) -> t == Root) (labNodes program) of
-               [] -> Nothing
-               [r@(_, Root)] -> Just r
-               _ -> error "Invariant broken: more than one Root node!"
+    case find nameMatcher (out program root) of
+      Just (_, n, _) -> modify $ delEdge (root, n)
+      Nothing -> return ()
+    modify $ insEdge (root, targetNode, Def name1)
+    return target
+        where
+            nameMatcher (_, _, Def name2) = name1 == name2
+            nameMatcher _ = False
+
+maybeRoot :: Program -> Maybe ProgramNode
+maybeRoot program = case filter (\(_, t) -> t == Root) (labNodes program) of
+                      [] -> Nothing
+                      [r@(_, Root)] -> Just r
+                      _ -> error "Invariant broken: more than one Root node!"
 
 findRoot :: Monad m => ProgramT m ProgramNode
-findRoot = maybeRoot >>= rootMaker
+findRoot = get >>= return . maybeRoot >>= rootMaker
     where
         rootMaker (Just r) = return r
         rootMaker Nothing = do
@@ -178,6 +183,15 @@ findRoot = maybeRoot >>= rootMaker
             let rootNode = (root, Root)
             modify $ insNode rootNode
             return rootNode
+
+resolve :: Program -> Name -> Maybe ProgramNode
+resolve program name1 = do
+    (root, _) <- maybeRoot program
+    (_, n, _) <- find nameMatcher (out program root)
+    return $ labNode' (context program n)
+        where
+            nameMatcher (_, _, Def name2) = name1 == name2
+            nameMatcher _ = False
 
 newNode :: Monad m => ProgramT m Node
 newNode = ProgramT $ get >>= return . head . newNodes 1

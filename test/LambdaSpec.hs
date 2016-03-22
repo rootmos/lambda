@@ -102,18 +102,37 @@ spec_def :: SpecWith ()
 spec_def = describe "def" $ do
     it "should add a Root node and a Def edge" $ runProgramT $ do
         x@(xn, _) <- variable "x"
-        def "foo" x
+        result <- def "foo" x
+        lift $ result `shouldBe` x
+
         program <- get
         let (root, Root) = head $ filter (\(_, t) -> t == Root) (labNodes program)
         lift $ out program root `shouldBe` [(root, xn, Def "foo")]
     it "should be able to define more than one thing" $ runProgramT $ do
-        x@(xn, _) <- variable "x"
-        y@(yn, _) <- variable "y"
-        def "foo" x
-        def "bar" y
+        (xn, _) <- def "foo" =<< variable "x"
+        (yn, _) <- def "bar" =<< variable "y"
+
         program <- get
-        Just (root, Root) <- maybeRoot
+        let Just (root, Root) = maybeRoot program
         lift $ out program root `shouldMatchList` [(root, xn, Def "foo"), (root, yn, Def "bar")]
+
+spec_resolve :: SpecWith ()
+spec_resolve = describe "reslove" $ do
+    it "should fail to resolve when nothing has been defined" $ do
+        expr <- buildProgramT $ variable "x"
+        (resolve (exprProgram expr) "foo") `shouldBe` Nothing
+    it "should fail to resolve when the wrong thing has been defined" $ do
+        expr <- buildProgramT $ def "foo" =<< variable "x"
+        (resolve (exprProgram expr) "bar") `shouldBe` Nothing
+    it "should resolve a previously defined expression" $ do
+        expr <- buildProgramT $ def "foo" =<< variable "x"
+        (resolve (exprProgram expr) "foo") `shouldBe` Just (exprNode expr)
+    it "should resolve to the latest defined expression" $ do
+        expr <- buildProgramT $ do
+            _ <- def "foo" =<< variable "y"
+            def "foo" =<< variable "x"
+        (resolve (exprProgram expr) "foo") `shouldBe` Just (exprNode expr)
+
 
 spec_copy :: SpecWith ()
 spec_copy = describe "copy" $ do
@@ -924,6 +943,7 @@ spec = do
     spec_lambda
     spec_app
     spec_def
+    spec_resolve
     spec_parent
     spec_parents
     spec_free
