@@ -42,7 +42,7 @@ lambda = parens $ lambdaSymbol >> do
         where
             lambdaSymbol = (oneOf ['\\', 'λ']) >> spaces
 
-lexer = P.makeTokenParser haskellDef 
+lexer = P.makeTokenParser haskellDef
 parens = P.parens lexer
 dot = P.dot lexer
 

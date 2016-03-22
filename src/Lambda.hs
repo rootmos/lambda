@@ -9,9 +9,9 @@ import Data.List (find)
 import LambdaParser
 import Test.QuickCheck
 
-data NodeLabel = Variable Name | Lambda Name | App
+data NodeLabel = Variable Name | Lambda Name | App | Root
     deriving (Show, Eq)
-data EdgeLabel = Binding | Body | Function | Argument
+data EdgeLabel = Binding | Body | Function | Argument | Def Name
     deriving (Show, Eq)
 
 type Program = Gr NodeLabel EdgeLabel
@@ -35,10 +35,11 @@ instance {-# OVERLAPPING #-} Arbitrary (ProgramT Identity ProgramNode) where
         node <- programM
         program <- get
         case node of
-          (_, Variable _) -> return []
           (ln, Lambda _) -> return [saveAndReturn . copy program $ body program ln]
           (an, App) -> return [ saveAndReturn . copy program $ function program an
                               , saveAndReturn . copy program $ argument program an]
+          _ -> return []
+         
 
 
 saveAndReturn :: Monad m => Expr -> ProgramT m ProgramNode
@@ -91,22 +92,24 @@ instance Show Expr where
     show (Expr (_, Variable name) _) = name
     show (Expr (ln, Lambda name) expr) = "(λ" ++ name ++ "." ++ show (Expr (body expr ln) expr) ++ ")"
     show (Expr (an, App) expr) = "(" ++ show (Expr (function expr an) expr) ++ " " ++ show (Expr ( argument expr an) expr) ++ ")"
+    show Expr { exprNode = (_, Root) } = error "Not implemented!"
 
 
 showHighlighted :: (Node -> Bool) -> Expr -> String
-showHighlighted p (Expr (vn, Variable name) _)
+showHighlighted p Expr { exprNode = (vn, Variable name) }
     | p vn = highlight name
     | otherwise = name
-showHighlighted p (Expr (ln, Lambda name) expr)
+showHighlighted p Expr { exprNode = (ln, Lambda name), exprProgram = expr }
     | p ln = highlight $ str
     | otherwise = str
         where
             str = "(λ" ++ name ++ "." ++ showHighlighted p (Expr (body expr ln) expr) ++ ")"
-showHighlighted p (Expr (an, App) expr)
+showHighlighted p Expr { exprNode = (an, App), exprProgram = expr }
     | p an = highlight $ str
     | otherwise = str
         where
             str = "(" ++ showHighlighted p (Expr (function expr an) expr) ++ " " ++ showHighlighted p (Expr ( argument expr an) expr) ++ ")"
+showHighlighted _ Expr { exprNode = (_, Root) } = error "Not implemented!"
 
 highlight :: String -> String
 highlight s = "<<" ++ s ++ ">>"
@@ -118,6 +121,7 @@ instance Eq Expr where
             pathifier (_, Variable name) _ = Variable name : []
             pathifier (n, Lambda name) p = Lambda name : pathifier (body p n) p
             pathifier (n, App) p = App : (pathifier (function p n) p ++ pathifier (function p n) p)
+            pathifier (_, Root) _ = error "Not implemented!"
 
 
 variable :: Monad m => Name -> ProgramT m ProgramNode
@@ -152,7 +156,28 @@ app fun arg = ProgramT $ do
     modify $ insEdge (fst appNode, fst arg, Argument)
     return appNode
 
+def :: Monad m => Name -> ProgramNode -> ProgramT m ()
+def name (targetNode, _) = findRoot >>= \(root, _) -> ProgramT $ do
+    modify $ insEdge (root, targetNode, Def name)
+    return ()
 
+maybeRoot :: Monad m => ProgramT m (Maybe ProgramNode)
+maybeRoot = ProgramT $ do
+    program <- get
+    return $ case filter (\(_, t) -> t == Root) (labNodes program) of
+               [] -> Nothing
+               [r@(_, Root)] -> Just r
+               _ -> error "Invariant broken: more than one Root node!"
+
+findRoot :: Monad m => ProgramT m ProgramNode
+findRoot = maybeRoot >>= rootMaker
+    where
+        rootMaker (Just r) = return r
+        rootMaker Nothing = do
+            root <- newNode
+            let rootNode = (root, Root)
+            modify $ insNode rootNode
+            return rootNode
 
 newNode :: Monad m => ProgramT m Node
 newNode = ProgramT $ get >>= return . head . newNodes 1
@@ -189,6 +214,7 @@ copy' p (an, App) = do
     fun <- copy' p (function p an)
     arg <- copy' p (argument p an)
     app fun arg
+copy' _ (_, Root) = error "Not implemented!"
 
 free :: Program -> [ProgramNode]
 free expr = labNodes $ labnfilter labledIsFreeVariable expr
@@ -208,6 +234,7 @@ free' (Expr { exprNode = node, exprProgram = program }) = freeWalker [] node
             | otherwise = []
         freeWalker binds (ln, Lambda name) = freeWalker (name:binds) (body program ln)
         freeWalker binds (an, App) = (freeWalker binds (function program an)) ++ (freeWalker binds (argument program an))
+        freeWalker _ (_, Root) = error "Not implemented!"
 
 mkExpr :: Monad m => ProgramNode -> ProgramT m Expr
 mkExpr node = do
@@ -374,6 +401,7 @@ substitute l@(ln, Lambda name1) (name2, nM)
                         Nothing -> name1
         modify $ delNode ln
         lambda newName newBody
+substitute (_, Root) _ = error "Not implemented!"
 
 variableNames :: [Name]
 variableNames = postfixAlphas [""] ++ postfixAlphas variableNames
@@ -399,6 +427,7 @@ betaReduce a@(an, App) = do
         modify $ delNode an
         return result
      _ -> return a
+betaReduce (_, Root) = error "Not implemented!"
 
 delete :: Monad m => ProgramNode -> ProgramT m ()
 delete (vn, Variable _) = modify $ delNode vn
@@ -411,6 +440,7 @@ delete (an, App) = do
     delete (function program an)
     delete (argument program an)
     modify $ delNode an
+delete (_, Root) = error "Not implemented!"
 
 
 etaReduce :: Monad m => ProgramNode -> ProgramT m ProgramNode
@@ -444,6 +474,7 @@ etaReduce l@(ln, Lambda name) = do
                 where
                     freeVariablesInFunction = map (\(n, _) -> variableName p n) $ free' (Expr (function p an) p)
         checkThatVariableIsFree _ _ = error "Programming error!"
+etaReduce (_, Root) = error "Not implemented!"
 
 
 data Complexity = Complexity { complexityNodes :: Int, complexityDegreesOfFreedom :: Int }
@@ -464,6 +495,7 @@ measure expr @ Expr { exprNode = (an, App) } = Complexity 1 (length $ free' expr
     where
         funExpr = expr { exprNode = function (exprProgram expr) an }
         argExpr = expr { exprNode = argument (exprProgram expr) an }
+measure Expr { exprNode = (_, Root) } = error "Not implemented!"
 
 
 simplify :: Expr -> Expr
@@ -482,6 +514,7 @@ simplify expr = case find simpler candidates of
                                    newArg <- let newArgExpr = simplify $ argument' expr
                                                in copy' (exprProgram newArgExpr) (exprNode newArgExpr)
                                    app newFun newArg
+                               (_, Root) -> error "Not implemented!"
 
     where
         simpler candidate = measure candidate < originalComplexity
@@ -507,4 +540,6 @@ toAST :: Expr -> AST
 toAST Expr { exprNode = (_, Variable name) } = V name
 toAST expr @ Expr { exprNode = (_, Lambda name) } = L name (toAST $ body' expr)
 toAST expr @ Expr { exprNode = (_, App) } = A (toAST $ function' expr) (toAST $ argument' expr)
+toAST Expr { exprNode = (_, Root) } = error "Not implemented!"
+
 

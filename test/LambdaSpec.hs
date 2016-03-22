@@ -97,6 +97,24 @@ spec_app = describe "app" $ do
         lift $ out expr a `shouldBe` [(a, xn, Function), (a, yn, Argument)]
         lift $ inn expr a `shouldBe` []
 
+
+spec_def :: SpecWith ()
+spec_def = describe "def" $ do
+    it "should add a Root node and a Def edge" $ runProgramT $ do
+        x@(xn, _) <- variable "x"
+        def "foo" x
+        program <- get
+        let (root, Root) = head $ filter (\(_, t) -> t == Root) (labNodes program)
+        lift $ out program root `shouldBe` [(root, xn, Def "foo")]
+    it "should be able to define more than one thing" $ runProgramT $ do
+        x@(xn, _) <- variable "x"
+        y@(yn, _) <- variable "y"
+        def "foo" x
+        def "bar" y
+        program <- get
+        Just (root, Root) <- maybeRoot
+        lift $ out program root `shouldMatchList` [(root, xn, Def "foo"), (root, yn, Def "bar")]
+
 spec_copy :: SpecWith ()
 spec_copy = describe "copy" $ do
     it "returns only the relevant nodes" $ do
@@ -905,6 +923,7 @@ spec = do
     spec_variable
     spec_lambda
     spec_app
+    spec_def
     spec_parent
     spec_parents
     spec_free
