@@ -9,8 +9,7 @@ import Control.Monad.State
 import Control.Monad.Writer
 import Debug.Trace
 import Data.List (find)
-
-type Name = String
+import LambdaParser
 
 data NodeLabel = Variable Name | Lambda Name | App
     deriving (Show, Eq)
@@ -1356,6 +1355,31 @@ spec_simplify = describe "simplify" $ do
         (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
         (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
 
+fromAST :: AST -> Expr
+fromAST = buildProgram . fromAST'
+
+fromAST' :: Monad m => AST -> ProgramT m ProgramNode
+fromAST' (V name) = variable name
+fromAST' (L name bodyAST) = fromAST' bodyAST >>= lambda name
+fromAST' (A funAST argAST) = do
+         fun <- fromAST' funAST
+         arg <- fromAST' argAST
+         app fun arg
+
+spec_fromAST :: SpecWith ()
+spec_fromAST = describe "fromAST" $ do
+    it "should convert V x" $ do
+        fromAST (V "x") `shouldBe` buildProgram (variable "x")
+    it "should convert L x (V x)" $ do
+        fromAST (L "x" (V "x")) `shouldBe` buildProgram (lambda "x" =<< variable "x")
+    it "should convert L x (V y)" $ do
+        fromAST (L "x" (V "y")) `shouldBe` buildProgram (lambda "x" =<< variable "y")
+    it "should convert (A (V x) (V y))" $ do
+        fromAST (A (V "x") (V "y")) `shouldBe` (buildProgram $ do
+                x <- variable "x"
+                y <- variable "y"
+                app x y)
+
 
 main :: IO ()
 main = hspec $ do
@@ -1375,3 +1399,4 @@ main = hspec $ do
     spec_etaReduce
     spec_measure
     spec_simplify
+    spec_fromAST

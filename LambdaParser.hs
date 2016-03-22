@@ -1,4 +1,4 @@
-module LambdaParser where
+module LambdaParser (AST(..), Name, parseLambda) where
 
 import Text.Parsec
 import qualified Text.Parsec.Token as P
@@ -46,7 +46,6 @@ lambda = parens $ lambdaSymbol >> do
 
 lexer = P.makeTokenParser haskellDef 
 parens = P.parens lexer
-symbol = P.symbol lexer
 dot = P.dot lexer
 
 spec_parseLambda :: SpecWith ()
