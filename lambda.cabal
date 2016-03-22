@@ -1,0 +1,21 @@
+name:             lambda
+version:          0.0.0
+license:          GPL
+license-file:     LICENSE
+copyright:        (c) 2016 Gustav Behm
+author:           Gustav Behm <gustav.behm@gmail.com>
+build-type:       Simple
+cabal-version:    >= 1.8
+
+library
+  ghc-options: -Wall
+  hs-source-dirs: src
+  exposed-modules: Lambda, LambdaParser
+  build-depends: base, fgl, mtl, parsec, QuickCheck
+
+test-suite spec
+  type: exitcode-stdio-1.0
+  ghc-options: -Wall
+  hs-source-dirs: test
+  main-is: Spec.hs
+  build-depends: base, fgl, mtl, lambda, hspec, QuickCheck
