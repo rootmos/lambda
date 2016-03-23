@@ -28,6 +28,8 @@ spec_parseLambda = describe "parseLambda" $ do
         parseLambda "((λx.y) z)" `shouldBe` (Right (A (L "x" (V "y")) (V "z")))
     it "should parse: foo := z" $ do
         parseLambda "foo := z" `shouldBe` (Right (D "foo" (V "z")))
+    it "should parse: foo := (x y)" $ do
+        parseLambda "foo := (x y)" `shouldBe` (Right (D "foo" (A (V "x") (V "y"))))
 
 spec :: SpecWith ()
 spec = do

@@ -18,6 +18,9 @@ type Program = Gr NodeLabel EdgeLabel
 type ProgramNode = LNode NodeLabel
 type ProgramEdge = LEdge EdgeLabel
 
+emptyProgram :: Program
+emptyProgram = empty
+
 newtype ProgramT m a = ProgramT {unProgramT :: StateT Program m a}
     deriving (Monad, MonadState Program, Applicative, Functor, MonadTrans)
 
@@ -39,7 +42,7 @@ instance {-# OVERLAPPING #-} Arbitrary (ProgramT Identity ProgramNode) where
           (an, App) -> return [ saveAndReturn . copy program $ function program an
                               , saveAndReturn . copy program $ argument program an]
           _ -> return []
-         
+
 
 
 saveAndReturn :: Monad m => Expr -> ProgramT m ProgramNode
@@ -183,6 +186,11 @@ findRoot = get >>= return . maybeRoot >>= rootMaker
             let rootNode = (root, Root)
             modify $ insNode rootNode
             return rootNode
+
+resolve' :: Program -> Name -> Maybe Expr
+resolve' program name = do
+    node <- resolve program name
+    return $ Expr { exprProgram = program, exprNode = node }
 
 resolve :: Program -> Name -> Maybe ProgramNode
 resolve program name1 = do
