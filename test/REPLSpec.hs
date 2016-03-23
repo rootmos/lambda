@@ -19,6 +19,13 @@ spec_doREPL = describe "doREPL" $ do
     it "should complain when trying to find undefined expression" $ do
         output <- flip evalStateT empty $ doREPL ":d bar"
         output `shouldBe` "bar is not defined"
+    it "should be able to define foo := x and retrieve it at a later time" $ do
+        output <- flip evalStateT empty $ do
+            _ <- doREPL "foo := x"
+            _ <- doREPL "y"
+            _ <- doREPL ":d foo"
+            doREPL ":d foo"
+        output `shouldBe` "x"
 
 spec :: SpecWith ()
 spec = do

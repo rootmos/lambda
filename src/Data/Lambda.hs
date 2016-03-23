@@ -6,6 +6,7 @@ module Data.Lambda ( Expr
                    , simplify
                    , resolve'
                    , empty
+                   , append
                    ) where
 
 import Data.Lambda.Internal

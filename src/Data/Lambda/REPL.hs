@@ -34,5 +34,5 @@ doREPL s
                     Left e -> return e
                     Right ast -> do
                         let newExpr = simplify . fromAST $ ast
-                        put $ exprProgram newExpr
+                        modify $ \program -> program `append` newExpr
                         return . show $ newExpr

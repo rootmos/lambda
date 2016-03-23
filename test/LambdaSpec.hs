@@ -207,6 +207,33 @@ spec_copy = describe "copy" $ do
         (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
         (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
 
+spec_append :: SpecWith ()
+spec_append = describe "append" $ do
+    it "should ignore an un-defined expression" $ do
+        let got = empty `append` (buildProgram $ variable "x")
+        let expected = emptyProgram
+
+        got `shouldBe` expected
+        (length . nodes $ got) `shouldBe` (length . nodes $ expected)
+        (length . edges $ got) `shouldBe` (length . edges $ expected)
+    it "should append a defined expression to an empty program" $ do
+        let expr = buildProgram $ def "foo" =<< variable "x"
+        let got = empty `append` expr
+        let expected = exprProgram expr
+
+        got `shouldBe` expected
+        (length . nodes $ got) `shouldBe` (length . nodes $ expected)
+        (length . edges $ got) `shouldBe` (length . edges $ expected)
+    it "should append into a non-empty program" $ do
+        let expr1 = buildProgram $ def "foo" =<< variable "x"
+        let expr2 = buildProgram $ def "bar" =<< variable "y"
+        let got = (empty `append` expr1) `append` expr2
+        let expected = exprProgram . buildProgram $ (def "foo" =<< variable "x") >> (def "bar" =<< variable "y")
+
+        got `shouldBe` expected
+        (length . nodes $ got) `shouldBe` (length . nodes $ expected)
+        (length . edges $ got) `shouldBe` (length . edges $ expected)
+
 spec_free :: SpecWith ()
 spec_free = describe "free" $ do
     it "claims x is free in: x" $ runProgramT $ do
@@ -997,6 +1024,7 @@ spec = do
     spec_definedAs
     spec_parent
     spec_parents
+    spec_append
     spec_free
     spec_free'
     spec_alphaEquivalent

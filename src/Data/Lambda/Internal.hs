@@ -10,9 +10,9 @@ import Data.Lambda.Parser
 import Test.QuickCheck
 
 data NodeLabel = Variable Name | Lambda Name | App | Root
-    deriving (Show, Eq)
+    deriving (Show, Eq, Ord)
 data EdgeLabel = Binding | Body | Function | Argument | Def Name
-    deriving (Show, Eq)
+    deriving (Show, Eq, Ord)
 
 type Program = Gr NodeLabel EdgeLabel
 type ProgramNode = LNode NodeLabel
@@ -245,6 +245,13 @@ copy' p (an, App) = do
     arg <- copy' p (argument p an)
     app fun arg
 copy' _ (_, Root) = error "Not implemented!"
+
+
+append :: Program -> Expr -> Program
+append program1 Expr { exprNode = node, exprProgram = program2 } =
+    case (definedAs program2 node) of
+      Just name -> exprProgram . buildProgram $ put program1 >> (def name =<< copy' program2 node)
+      Nothing -> program1
 
 free :: Program -> [ProgramNode]
 free expr = labNodes $ labnfilter labledIsFreeVariable expr
