@@ -6,6 +6,7 @@ module Data.Lambda ( Expr
                    , simplify
                    , resolve'
                    , empty
+                   , baseProgram
                    , append
                    ) where
 

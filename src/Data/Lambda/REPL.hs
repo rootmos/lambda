@@ -10,7 +10,7 @@ import Data.List (isPrefixOf, stripPrefix)
 import Control.Monad.State
 
 runREPL :: IO ()
-runREPL = evalStateT runREPL' empty
+runREPL = evalStateT runREPL' baseProgram
 
 runREPL' :: StateT Program IO ()
 runREPL' = lift (readline "lambda> ") >>= loop

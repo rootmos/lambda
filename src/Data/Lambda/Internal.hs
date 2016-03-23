@@ -18,9 +18,6 @@ type Program = Gr NodeLabel EdgeLabel
 type ProgramNode = LNode NodeLabel
 type ProgramEdge = LEdge EdgeLabel
 
-emptyProgram :: Program
-emptyProgram = empty
-
 newtype ProgramT m a = ProgramT {unProgramT :: StateT Program m a}
     deriving (Monad, MonadState Program, Applicative, Functor, MonadTrans)
 
@@ -207,7 +204,7 @@ definedAs :: Program -> ProgramNode -> Maybe Name
 definedAs program n1 = fst <$> find (\(_, n2) -> n1 == n2) (definedExprs program)
 
 definedExprs :: Program -> [(Name, ProgramNode)]
-definedExprs program = 
+definedExprs program =
     case maybeRoot program of
         Just (root, _) -> map (\(_, n, Def name) -> (name, labNode' $ context program n)) (out program root)
         Nothing -> []
@@ -589,3 +586,26 @@ toAST expr @ Expr { exprNode = (_, App) } = A (toAST $ function' expr) (toAST $ 
 toAST Expr { exprNode = (_, Root) } = error "Not implemented!"
 
 
+emptyProgram :: Program
+emptyProgram = empty
+
+churchTrue :: Monad m => ProgramT m ProgramNode
+churchTrue = def "true" =<< lambda "a" =<< lambda "b" =<< variable "a"
+
+churchFalse :: Monad m => ProgramT m ProgramNode
+churchFalse = def "false" =<< lambda "a" =<< lambda "b" =<< variable "b"
+
+churchIf :: Monad m => ProgramT m ProgramNode
+churchIf = def "if" =<< lambda "p" =<< lambda "a" =<< lambda "b" =<< do
+                   fun <- do
+                       fun <- variable "p"
+                       arg <- variable "a"
+                       app fun arg
+                   arg <- variable "b"
+                   app fun arg
+
+churchNumeral :: Monad m => Int -> ProgramT m ProgramNode
+churchNumeral n = def (show n) =<< lambda "f" =<< lambda "x" =<< foldr (=<<) (variable "x") (replicate n (\arg -> do fun <- variable "f"; app fun arg))
+
+baseProgram :: Program
+baseProgram = exprProgram . buildProgram $ churchTrue >> churchFalse >> churchIf >> churchNumeral 0 >> churchNumeral 1 >> churchNumeral 2 >> churchNumeral 3
