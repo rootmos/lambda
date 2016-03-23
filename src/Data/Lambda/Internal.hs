@@ -201,6 +201,14 @@ resolve program name1 = do
             nameMatcher (_, _, Def name2) = name1 == name2
             nameMatcher _ = False
 
+definedAs :: Program -> ProgramNode -> Maybe Name
+definedAs program (n1, _) =
+    case maybeRoot program of
+        Just (root, _) -> case find (\(_, n2, _) -> n1 == n2) (out program root) of
+                            Just (_, _, Def name) -> Just name
+                            _ -> Nothing
+        _ -> Nothing
+
 newNode :: Monad m => ProgramT m Node
 newNode = ProgramT $ get >>= return . head . newNodes 1
 
@@ -525,17 +533,22 @@ simplify expr = case find simpler candidates of
                   Just reduced -> simplify reduced
                   Nothing -> case exprNode expr of
                                (_, Variable _) -> expr
-                               (ln, Lambda name) -> buildProgram $ do
+                               l@(ln, Lambda name) -> buildProgram $ do
                                    newBody <- let newBodyExpr =  simplify $ body' expr
                                                in copy' (exprProgram newBodyExpr) (exprNode newBodyExpr)
+                                   let maybeDef = definedAs (exprProgram expr) l
                                    modify $ delNode ln
-                                   lambda name newBody
-                               (_, App) -> buildProgram $ do
+                                   case maybeDef of
+                                     Just defName -> def defName =<< lambda name newBody
+                                     Nothing -> lambda name newBody
+                               a@(_, App) -> buildProgram $ do
                                    newFun <- let newFunExpr = simplify $ function' expr
                                               in copy' (exprProgram newFunExpr) (exprNode newFunExpr)
                                    newArg <- let newArgExpr = simplify $ argument' expr
                                                in copy' (exprProgram newArgExpr) (exprNode newArgExpr)
-                                   app newFun newArg
+                                   case definedAs (exprProgram expr) a of
+                                     Just defName -> def defName =<< app newFun newArg
+                                     Nothing -> app newFun newArg
                                (_, Root) -> error "Not implemented!"
 
     where

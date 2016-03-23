@@ -133,6 +133,19 @@ spec_resolve = describe "reslove" $ do
             def "foo" =<< variable "x"
         (resolve (exprProgram expr) "foo") `shouldBe` Just (exprNode expr)
 
+spec_definedAs :: SpecWith ()
+spec_definedAs = describe "definedAs" $ do
+    it "should find name of defined node" $ do
+        expr <- buildProgramT $ def "foo" =<< variable "x"
+        (definedAs (exprProgram expr) (exprNode expr)) `shouldBe` Just "foo"
+    it "should not find name of un-defined node" $ do
+        expr <- buildProgramT $ variable "x"
+        (definedAs (exprProgram expr) (exprNode expr)) `shouldBe` Nothing
+    it "should not find name of un-defined node (even when there are other defined nodes)" $ do
+        expr <- buildProgramT $ do
+            _ <- def "foo" =<< variable "x"
+            variable "y"
+        (definedAs (exprProgram expr) (exprNode expr)) `shouldBe` Nothing
 
 spec_copy :: SpecWith ()
 spec_copy = describe "copy" $ do
@@ -832,6 +845,21 @@ spec_measure = describe "measure" $ do
 
 spec_simplify :: SpecWith ()
 spec_simplify = describe "simplify" $ do
+    it "should remain the same: λx.y" $ do
+        original <- buildProgramT $ lambda "x" =<< variable "y"
+        let simplified = simplify original
+        original `shouldBe` simplified
+        (length . nodes $ exprProgram original) `shouldBe` (length . nodes $ exprProgram simplified)
+        (length . edges $ exprProgram original) `shouldBe` (length . edges $ exprProgram simplified)
+    it "should remain the same: (x y)" $ do
+        original <- buildProgramT $ do
+            fun <- variable "x"
+            arg <- variable "y"
+            app fun arg
+        let simplified = simplify original
+        original `shouldBe` simplified
+        (length . nodes $ exprProgram original) `shouldBe` (length . nodes $ exprProgram simplified)
+        (length . edges $ exprProgram original) `shouldBe` (length . edges $ exprProgram simplified)
     it "should beta reduce when it can: ((λx.x) y) to y" $ do
         got <- liftM simplify . buildProgramT $ do
             fun <- lambda "x" =<< variable "x"
@@ -916,6 +944,21 @@ spec_simplify = describe "simplify" $ do
         got `shouldBe` expected
         (length . nodes $ exprProgram got) `shouldBe` (length . nodes $ exprProgram expected)
         (length . edges $ exprProgram got) `shouldBe` (length . edges $ exprProgram expected)
+    it "should not break definitions: foo := (x y) should remain the same" $ do
+        original <- buildProgramT $ def "foo" =<< do
+            fun <- variable "x"
+            arg <- variable "y"
+            app fun arg
+        let simplified = simplify original
+        original `shouldBe` simplified
+        (length . nodes $ exprProgram original) `shouldBe` (length . nodes $ exprProgram simplified)
+        (length . edges $ exprProgram original) `shouldBe` (length . edges $ exprProgram simplified)
+    it "should not break definitions: foo := (λx.y) should remain the same" $ do
+        original <- buildProgramT $ def "foo" =<< lambda "x" =<< variable "y"
+        let simplified = simplify original
+        original `shouldBe` simplified
+        (length . nodes $ exprProgram original) `shouldBe` (length . nodes $ exprProgram simplified)
+        (length . edges $ exprProgram original) `shouldBe` (length . edges $ exprProgram simplified)
 
 spec_fromAST :: SpecWith ()
 spec_fromAST = describe "fromAST" $ do
@@ -932,6 +975,11 @@ spec_fromAST = describe "fromAST" $ do
                 app x y)
     it "should convert (D foo (V x))" $ do
         fromAST (D "foo" (V "x")) `shouldBe` buildProgram (def "foo" =<< variable "x")
+    it "should convert (D foo (A (V x) (V y)))" $ do
+        fromAST (D "foo" (A (V "x") (V "y"))) `shouldBe` (buildProgram $ def "foo" =<< do
+            x <- variable "x"
+            y <- variable "y"
+            app x y)
 
 spec_toAST :: SpecWith ()
 spec_toAST = describe "toAST" $ do
@@ -946,6 +994,7 @@ spec = do
     spec_app
     spec_def
     spec_resolve
+    spec_definedAs
     spec_parent
     spec_parents
     spec_free

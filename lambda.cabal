@@ -12,7 +12,7 @@ library
   other-modules: Data.Lambda.Internal
   ghc-options: -Wall
   hs-source-dirs: src
-  build-depends: base, fgl, mtl, parsec, QuickCheck, readline
+  build-depends: base, fgl, mtl, transformers, parsec, QuickCheck, readline
 
 executable lambda
   main-is: Main.hs
@@ -25,4 +25,4 @@ test-suite spec
   ghc-options: -Wall
   hs-source-dirs: test, src
   main-is: Spec.hs
-  build-depends: base, fgl, mtl, lambda, hspec, QuickCheck, parsec, readline
+  build-depends: base, fgl, mtl, transformers, lambda, hspec, QuickCheck, parsec, readline

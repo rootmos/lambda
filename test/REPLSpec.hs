@@ -13,6 +13,9 @@ spec_doREPL = describe "doREPL" $ do
     it "should be able to define foo := x and retrieve it with :d foo" $ do
         output <- flip evalStateT empty $ doREPL "foo := x" >> doREPL ":d foo"
         output `shouldBe` "x"
+    it "should be able to define foo := (x y) and retrieve it with :d foo" $ do
+        output <- flip evalStateT empty $ doREPL "foo := (x y)" >> doREPL ":d foo"
+        output `shouldBe` "(x y)"
     it "should complain when trying to find undefined expression" $ do
         output <- flip evalStateT empty $ doREPL ":d bar"
         output `shouldBe` "bar is not defined"
