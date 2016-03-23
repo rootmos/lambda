@@ -30,6 +30,7 @@ doREPL s
         case resolve' program name  of
           Just expr -> return $ show expr
           Nothing -> return $ name ++ " is not defined"
+    | ":p" `isPrefixOf` s = get >>= return . show
     | otherwise = case parseLambda s of
                     Left e -> return e
                     Right ast -> do

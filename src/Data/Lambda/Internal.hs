@@ -5,7 +5,7 @@ import Data.Graph.Inductive
 import Control.Monad.Identity
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.List (find)
+import Data.List (find, intercalate)
 import Data.Lambda.Parser
 import Test.QuickCheck
 
@@ -92,10 +92,18 @@ instance Arbitrary Expr where
     arbitrary = arbitrary >>= buildProgramT
 
 instance Show Expr where
-    show (Expr (_, Variable name) _) = name
-    show (Expr (ln, Lambda name) expr) = "(λ" ++ name ++ "." ++ show (Expr (body expr ln) expr) ++ ")"
-    show (Expr (an, App) expr) = "(" ++ show (Expr (function expr an) expr) ++ " " ++ show (Expr ( argument expr an) expr) ++ ")"
-    show Expr { exprNode = (_, Root) } = error "Not implemented!"
+    show expr = showNode (exprProgram expr) (exprNode expr)
+
+showNode :: Program -> ProgramNode -> String
+showNode _ (_, Variable name) = name
+showNode program (ln, Lambda name) = "(λ" ++ name ++ "." ++ showNode program (body program ln) ++ ")"
+showNode program (an, App) = "(" ++ showNode program (function program an) ++ " " ++ showNode program (argument program an) ++ ")"
+showNode _ (_, Root) = error "Not implemented!"
+
+instance {-# OVERLAPPING #-} Show Program where
+    show program
+        | program == emptyProgram = "program is empty"
+        | otherwise = intercalate "\n" $ map (\(name, node) -> name ++ " := " ++ (showNode program node)) (definedExprs program)
 
 
 showHighlighted :: (Node -> Bool) -> Expr -> String
@@ -193,21 +201,16 @@ resolve' program name = do
     return $ Expr { exprProgram = program, exprNode = node }
 
 resolve :: Program -> Name -> Maybe ProgramNode
-resolve program name1 = do
-    (root, _) <- maybeRoot program
-    (_, n, _) <- find nameMatcher (out program root)
-    return $ labNode' (context program n)
-        where
-            nameMatcher (_, _, Def name2) = name1 == name2
-            nameMatcher _ = False
+resolve program name1 = snd <$> find (\(name2, _) -> name1 == name2) (definedExprs program)
 
 definedAs :: Program -> ProgramNode -> Maybe Name
-definedAs program (n1, _) =
+definedAs program n1 = fst <$> find (\(_, n2) -> n1 == n2) (definedExprs program)
+
+definedExprs :: Program -> [(Name, ProgramNode)]
+definedExprs program = 
     case maybeRoot program of
-        Just (root, _) -> case find (\(_, n2, _) -> n1 == n2) (out program root) of
-                            Just (_, _, Def name) -> Just name
-                            _ -> Nothing
-        _ -> Nothing
+        Just (root, _) -> map (\(_, n, Def name) -> (name, labNode' $ context program n)) (out program root)
+        Nothing -> []
 
 newNode :: Monad m => ProgramT m Node
 newNode = ProgramT $ get >>= return . head . newNodes 1

@@ -26,6 +26,12 @@ spec_doREPL = describe "doREPL" $ do
             _ <- doREPL ":d foo"
             doREPL ":d foo"
         output `shouldBe` "x"
+    it ":p should print the current program" $ do
+        output <- flip evalStateT empty $ do
+            _ <- doREPL "foo := x"
+            doREPL ":p"
+        output `shouldBe` "foo := x"
+
 
 spec :: SpecWith ()
 spec = do

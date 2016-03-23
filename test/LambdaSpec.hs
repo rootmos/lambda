@@ -44,6 +44,19 @@ spec_Expr_Eq_instance = describe "Expr's Eq instance" $ do
         p2 <- buildProgramT $ variable "x"
         p1 `shouldBe` p2
 
+spec_Program_Show_instance :: SpecWith ()
+spec_Program_Show_instance = describe "Program's show instance" $ do
+    it "should print \"program is empty\" for the empty program" $ do
+        show (empty :: Program) `shouldBe` "program is empty"
+    it "should print all defined expressions in a simple non-empty program" $ do
+        let program = exprProgram . buildProgram $ def "foo" =<< variable "x"
+        show program `shouldBe` "foo := x"
+    it "should print all defined expressions in a more complex non-empty program" $ do
+        let program = exprProgram . buildProgram $ do
+             _ <- def "foo" =<< lambda "y" =<< variable "x"
+             def "bar" =<< variable "z"
+        show program `shouldBe` "foo := (λy.x)\nbar := z"
+
 spec_variable :: SpecWith ()
 spec_variable = describe "variable" $ do
     it "should create a lone node" $ runProgramT $ do
@@ -1031,6 +1044,7 @@ spec = do
     spec_substitute
     spec_Expr_Show_instance
     spec_Expr_Eq_instance
+    spec_Program_Show_instance 
     spec_copy
     spec_betaReduce
     spec_etaReduce
