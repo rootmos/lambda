@@ -1,28 +1,38 @@
-module Data.Lambda.REPL (runREPL) where
+module Data.Lambda.REPL ( runREPL
+                        , doREPL
+                        ) where
 
 import Data.Maybe
 import Data.Lambda
 import Data.Lambda.Parser
 import System.Console.Readline
 import Data.List (isPrefixOf, stripPrefix)
+import Control.Monad.State
 
 runREPL :: IO ()
-runREPL = runREPL' empty >> return ()
+runREPL = evalStateT runREPL' empty
 
-runREPL' :: Program -> IO Program
-runREPL' program = readline "lambda> " >>= loop
+runREPL' :: StateT Program IO ()
+runREPL' = lift (readline "lambda> ") >>= loop
     where
-        loop (Just s) = addHistory s >> doREPL program s >>= runREPL'
-        loop Nothing = return program
+        loop (Just s) = do
+            lift $ addHistory s
+            output <- doREPL s
+            lift $ putStrLn output
+            runREPL'
+        loop Nothing = return ()
 
-doREPL :: Program -> String -> IO Program
-doREPL program s
+doREPL :: Monad m => String -> StateT Program m String
+doREPL s
     | ":d " `isPrefixOf` s = do
-        putStrLn . show $ resolve' program (fromJust $ stripPrefix ":d " s)
-        return program
+        program <- get
+        let name = (fromJust $ stripPrefix ":d " s)
+        case resolve' program name  of
+          Just expr -> return $ show expr
+          Nothing -> return $ name ++ " is not defined"
     | otherwise = case parseLambda s of
-                    Left e -> putStrLn e >> return program
+                    Left e -> return e
                     Right ast -> do
                         let newExpr = simplify . fromAST $ ast
-                        putStrLn . show $ newExpr
-                        return $ exprProgram newExpr
+                        put $ exprProgram newExpr
+                        return . show $ newExpr
