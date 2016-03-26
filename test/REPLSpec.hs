@@ -9,28 +9,31 @@ spec_doREPL :: SpecWith ()
 spec_doREPL = describe "doREPL" $ do
     it "should parse (\\x.y) and output the same" $ do
         output <- flip evalStateT empty $ doREPL "(\\x.y)"
-        output `shouldBe` "(λx.y)"
+        output `shouldBe` Just "(λx.y)"
     it "should be able to define foo := x and retrieve it with :d foo" $ do
         output <- flip evalStateT empty $ doREPL "foo := x" >> doREPL ":d foo"
-        output `shouldBe` "x"
+        output `shouldBe` Just "x"
     it "should be able to define foo := (x y) and retrieve it with :d foo" $ do
         output <- flip evalStateT empty $ doREPL "foo := (x y)" >> doREPL ":d foo"
-        output `shouldBe` "(x y)"
+        output `shouldBe` Just "(x y)"
     it "should complain when trying to find undefined expression" $ do
         output <- flip evalStateT empty $ doREPL ":d bar"
-        output `shouldBe` "bar is not defined"
+        output `shouldBe` Just "bar is not defined"
     it "should be able to define foo := x and retrieve it at a later time" $ do
         output <- flip evalStateT empty $ do
             _ <- doREPL "foo := x"
             _ <- doREPL "y"
             _ <- doREPL ":d foo"
             doREPL ":d foo"
-        output `shouldBe` "x"
+        output `shouldBe` Just "x"
     it ":p should print the current program" $ do
         output <- flip evalStateT empty $ do
             _ <- doREPL "foo := x"
             doREPL ":p"
-        output `shouldBe` "foo := x"
+        output `shouldBe` Just "foo := x"
+    it "should return Nothing when nothing is inputed" $ do
+        output <- flip evalStateT empty $ doREPL ""
+        output `shouldBe` Nothing
 
 
 spec :: SpecWith ()
