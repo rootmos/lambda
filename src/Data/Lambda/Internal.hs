@@ -89,18 +89,19 @@ instance Arbitrary Expr where
     arbitrary = arbitrary >>= buildProgramT
 
 instance Show Expr where
-    show expr = showNode (exprProgram expr) (exprNode expr)
+    show expr = showNode True (exprProgram expr) (exprNode expr)
 
-showNode :: Program -> ProgramNode -> String
-showNode _ (_, Variable name) = name
-showNode program (ln, Lambda name) = "(λ" ++ name ++ "." ++ showNode program (body program ln) ++ ")"
-showNode program (an, App) = "(" ++ showNode program (function program an) ++ " " ++ showNode program (argument program an) ++ ")"
-showNode _ (_, Root) = error "Not implemented!"
+showNode :: Bool -> Program -> ProgramNode -> String
+showNode _ _ (_, Variable name) = name
+showNode True program l = "(" ++ showNode False program l ++ ")"
+showNode False program (ln, Lambda name) = "λ" ++ name ++ "." ++ showNode True program (body program ln)
+showNode False program (an, App) = showNode (not . isApplication program . fst $ function program an) program (function program an) ++ " " ++ showNode True program (argument program an)
+showNode _ _ (_, Root) = error "Not implemented!"
 
 instance {-# OVERLAPPING #-} Show Program where
     show program
         | program == emptyProgram = "program is empty"
-        | otherwise = intercalate "\n" $ map (\(name, node) -> name ++ " := " ++ (showNode program node)) (definedExprs program)
+        | otherwise = intercalate "\n" $ map (\(name, node) -> name ++ " := " ++ (showNode True program node)) (definedExprs program)
 
 
 showHighlighted :: (Node -> Bool) -> Expr -> String
@@ -286,6 +287,11 @@ variableName expr n = let (Variable name) = lab' $ context expr n
 isVariable :: Program -> Node -> Bool
 isVariable expr n = case lab' $ context expr n of
                       Variable _ -> True
+                      _ -> False
+
+isApplication :: Program -> Node -> Bool
+isApplication expr n = case lab' $ context expr n of
+                      App -> True
                       _ -> False
 
 isFree :: Program -> Node -> Bool

@@ -23,6 +23,27 @@ spec_Expr_Show_instance = describe "Expr's show instance" $ do
             y <- variable "y"
             app x y
         show p `shouldBe` "(x y)"
+    it "shows x y z correctly" $ do
+        p <- buildProgramT $ do
+            fun <- do
+                fun <- variable "x"
+                arg <- variable "y"
+                app fun arg
+            arg <- variable "z"
+            app fun arg
+        show p `shouldBe` "(x y z)"
+    it "shows x y z u correctly" $ do
+        p <- buildProgramT $ do
+            fun <- do
+                fun <- do
+                   fun <- variable "x"
+                   arg <- variable "y"
+                   app fun arg
+                arg <- variable "z"
+                app fun arg
+            arg <- variable "u"
+            app fun arg
+        show p `shouldBe` "(x y z u)"
 
 spec_Expr_Eq_instance :: SpecWith ()
 spec_Expr_Eq_instance = describe "Expr's Eq instance" $ do
