@@ -31,7 +31,7 @@ variableName :: Parsec String st Name
 variableName = many1 alphaNum <* spaces
 
 app :: Parsec String st AST
-app = parens (A <$> lambdaParser <* spaces <*> lambdaParser)
+app = parens $ chainl1 lambdaParser (spaces >> return A)
 
 lambda :: Parsec String st AST
 lambda = parens $ lambdaSymbol >> do

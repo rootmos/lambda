@@ -8,6 +8,8 @@ spec_parseLambda :: SpecWith ()
 spec_parseLambda = describe "parseLambda" $ do
     it "should parse: x" $ do
         parseLambda "x" `shouldBe` (Right (V "x"))
+    it "should parse: (foo)" $ do
+        parseLambda "(foo)" `shouldBe` (Right (V "foo"))
     it "should parse: x (with trailing whitespace)" $ do
         parseLambda "x " `shouldBe` (Right (V "x"))
     it "should not parse: x//~" $ do
@@ -30,6 +32,10 @@ spec_parseLambda = describe "parseLambda" $ do
         parseLambda "foo := z" `shouldBe` (Right (D "foo" (V "z")))
     it "should parse: foo := (x y)" $ do
         parseLambda "foo := (x y)" `shouldBe` (Right (D "foo" (A (V "x") (V "y"))))
+    it "should parse: (x y z) left-associatively" $ do
+        parseLambda "(x y z)" `shouldBe` (Right (A (A (V "x") (V "y")) (V "z")))
+    it "should parse: (x y z u) left-associatively" $ do
+        parseLambda "(x y z u)" `shouldBe` (Right (A (A (A (V "x") (V "y")) (V "z")) (V "u")))
 
 spec :: SpecWith ()
 spec = do
