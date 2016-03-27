@@ -1047,6 +1047,15 @@ spec_toAST = describe "toAST" $ do
     it "should satisify fromAST . toAST = id" $ property $
         \e -> (fromAST . toAST $ e) == e
 
+prop_shown_expression_is_parseable :: ProgramT Identity ProgramNode -> Bool
+prop_shown_expression_is_parseable exprM = original == got
+    where
+        original = buildProgram exprM
+        got = fromAST . fromRight . parseLambda . show $ original
+
+        fromRight (Right x) = x
+        fromRight _ = error "Oh noes!"
+
 
 spec :: SpecWith ()
 spec = do
@@ -1073,3 +1082,5 @@ spec = do
     spec_simplify
     spec_fromAST
     spec_toAST
+    describe "a shown expression should be parseable" $ do
+       it "shows and parses the thing" $ property prop_shown_expression_is_parseable
