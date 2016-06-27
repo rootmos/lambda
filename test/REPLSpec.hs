@@ -35,6 +35,19 @@ spec_doREPL = describe "doREPL" $ do
         output <- flip evalStateT empty $ doREPL ""
         output `shouldBe` Nothing
 
+    describe "basic programs" $ do
+        it "(true 1 2) should return 1" $ do
+            output <- flip evalStateT empty $ doREPL "(true 1 2)"
+            output `shouldBe` Just "1"
+        it "(false 1 2) should return 2" $ do
+            output <- flip evalStateT empty $ doREPL "(false 1 2)"
+            output `shouldBe` Just "2"
+        it "(if true 1 2) should return 1" $ do
+            output <- flip evalStateT empty $ doREPL "(if true 1 2)"
+            output `shouldBe` Just "1"
+        it "(if false 1 2) should return 1" $ do
+            output <- flip evalStateT empty $ doREPL "(if false 1 2)"
+            output `shouldBe` Just "2"
 
 spec :: SpecWith ()
 spec = do
