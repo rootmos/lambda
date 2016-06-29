@@ -8,7 +8,6 @@ import Control.Monad.Writer
 import Data.List (find, intercalate)
 import Data.Lambda.Parser
 import Test.QuickCheck
-import Debug.Trace
 
 data NodeLabel = Variable Name | Lambda Name | App | Root
     deriving (Show, Eq, Ord)
@@ -211,6 +210,14 @@ resolveAll program expr = foldr tryResolveVariable expr (free' expr)
                                                         arg <- copy' (exprProgram resolvedExpr) (exprNode resolvedExpr)
                                                         app fun arg
                                                     Nothing  -> e
+        tryResolveVariable _ _ = error "free' has returned a non-variable"
+
+isEquivalentToDefinition :: Program -> Expr -> Maybe Name
+isEquivalentToDefinition program expr = fmap fst $ find (\(_, x) -> alphaEquivalent expr x) theDefinedExprs
+    where
+        theDefinedExprs :: [(Name, Expr)]
+        theDefinedExprs = map exprifyer (definedExprs program)
+        exprifyer (name, node) = (name, Expr node program)
 
 definedAs :: Program -> ProgramNode -> Maybe Name
 definedAs program n1 = fst <$> find (\(_, n2) -> n1 == n2) (definedExprs program)

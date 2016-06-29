@@ -9,6 +9,7 @@ module Data.Lambda ( Expr
                    , empty
                    , baseProgram
                    , append
+                   , isEquivalentToDefinition
                    ) where
 
 import Data.Lambda.Internal

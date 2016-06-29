@@ -39,16 +39,16 @@ spec_doREPL = describe "doREPL" $ do
         it "(id x) should return x" $ do
             output <- flip evalStateT baseProgram $ doREPL "(id x)"
             output `shouldBe` Just "x"
-        it "(true 1 2) should return 1" $ do
+        it "(true 1 2) should return id" $ do
             output <- flip evalStateT baseProgram $ doREPL "(true 1 2)"
-            output `shouldBe` Just "1"
+            output `shouldBe` Just "id"
         it "(false 1 2) should return 2" $ do
             output <- flip evalStateT baseProgram $ doREPL "(false 1 2)"
             output `shouldBe` Just "2"
-        it "(if true 1 2) should return 1" $ do
+        it "(if true 1 2) should return id" $ do
             output <- flip evalStateT baseProgram $ doREPL "(if true 1 2)"
-            output `shouldBe` Just "1"
-        it "(if false 1 2) should return 1" $ do
+            output `shouldBe` Just "id"
+        it "(if false 1 2) should return 2" $ do
             output <- flip evalStateT baseProgram $ doREPL "(if false 1 2)"
             output `shouldBe` Just "2"
 

@@ -40,4 +40,6 @@ doREPL s
                         prevProgram <- get
                         let newExpr = simplify . resolveAll prevProgram . fromAST $ ast
                         modify $ \program -> program `append` newExpr
-                        return . Just . show $ newExpr
+                        case isEquivalentToDefinition prevProgram newExpr of
+                          Just name -> return $ Just name
+                          Nothing -> return . Just . show $ newExpr
