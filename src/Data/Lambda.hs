@@ -5,6 +5,7 @@ module Data.Lambda ( Expr
                    , fromAST
                    , simplify
                    , resolve'
+                   , resolveAll
                    , empty
                    , baseProgram
                    , append

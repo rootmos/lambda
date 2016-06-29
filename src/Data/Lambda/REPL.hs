@@ -37,6 +37,7 @@ doREPL s
     | otherwise = case parseLambda s of
                     Left e -> return (Just e)
                     Right ast -> do
-                        let newExpr = simplify . fromAST $ ast
+                        prevProgram <- get
+                        let newExpr = simplify . resolveAll prevProgram . fromAST $ ast
                         modify $ \program -> program `append` newExpr
                         return . Just . show $ newExpr

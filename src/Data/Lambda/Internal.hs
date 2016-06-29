@@ -8,6 +8,7 @@ import Control.Monad.Writer
 import Data.List (find, intercalate)
 import Data.Lambda.Parser
 import Test.QuickCheck
+import Debug.Trace
 
 data NodeLabel = Variable Name | Lambda Name | App | Root
     deriving (Show, Eq, Ord)
@@ -200,6 +201,16 @@ resolve' program name = do
 
 resolve :: Program -> Name -> Maybe ProgramNode
 resolve program name1 = snd <$> find (\(name2, _) -> name1 == name2) (definedExprs program)
+
+resolveAll :: Program -> Expr -> Expr
+resolveAll program expr = foldr tryResolveVariable expr (free' expr)
+    where
+        tryResolveVariable (_, Variable name) e = case resolve' program name of
+                                                    Just resolvedExpr -> simplify $ resolveAll program $ buildProgram $ do
+                                                        fun <- lambda name =<< copy' (exprProgram expr) (exprNode expr)
+                                                        arg <- copy' (exprProgram resolvedExpr) (exprNode resolvedExpr)
+                                                        app fun arg
+                                                    Nothing  -> e
 
 definedAs :: Program -> ProgramNode -> Maybe Name
 definedAs program n1 = fst <$> find (\(_, n2) -> n1 == n2) (definedExprs program)
@@ -613,5 +624,8 @@ churchIf = def "if" =<< lambda "p" =<< lambda "a" =<< lambda "b" =<< do
 churchNumeral :: Monad m => Int -> ProgramT m ProgramNode
 churchNumeral n = def (show n) =<< lambda "f" =<< lambda "x" =<< foldr (=<<) (variable "x") (replicate n (\arg -> do fun <- variable "f"; app fun arg))
 
+identityFunction :: Monad m => ProgramT m ProgramNode
+identityFunction = def "id" =<< lambda "x" =<< variable "x"
+
 baseProgram :: Program
-baseProgram = exprProgram . buildProgram $ churchTrue >> churchFalse >> churchIf >> churchNumeral 0 >> churchNumeral 1 >> churchNumeral 2 >> churchNumeral 3
+baseProgram = exprProgram . buildProgram $ identityFunction >> churchTrue >> churchFalse >> churchIf >> churchNumeral 0 >> churchNumeral 1 >> churchNumeral 2 >> churchNumeral 3

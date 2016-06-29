@@ -167,6 +167,14 @@ spec_resolve = describe "reslove" $ do
             def "foo" =<< variable "x"
         (resolve (exprProgram expr) "foo") `shouldBe` Just (exprNode expr)
 
+spec_resolveAll :: SpecWith ()
+spec_resolveAll = describe "resolveAll" $ do
+    it "should resolve a free variable with a defined one" $ do
+        expr <- buildProgramT $ (def "foo" =<< variable "x") >> variable "foo"
+        expected <- buildProgramT $ (def "foo" =<< variable "x") >> variable "x"
+        (resolveAll (exprProgram expr) expr) `shouldBe` expected
+
+
 spec_definedAs :: SpecWith ()
 spec_definedAs = describe "definedAs" $ do
     it "should find name of defined node" $ do
@@ -1064,6 +1072,7 @@ spec = do
     spec_app
     spec_def
     spec_resolve
+    spec_resolveAll
     spec_definedAs
     spec_parent
     spec_parents
@@ -1074,7 +1083,7 @@ spec = do
     spec_substitute
     spec_Expr_Show_instance
     spec_Expr_Eq_instance
-    spec_Program_Show_instance 
+    spec_Program_Show_instance
     spec_copy
     spec_betaReduce
     spec_etaReduce
