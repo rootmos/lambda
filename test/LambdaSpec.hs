@@ -166,6 +166,11 @@ spec_resolve = describe "reslove" $ do
             _ <- def "foo" =<< variable "y"
             def "foo" =<< variable "x"
         (resolve (exprProgram expr) "foo") `shouldBe` Just (exprNode expr)
+    it "should resolve numbers to Church numerals" $ property $ prop_resolve_numerals
+
+
+prop_resolve_numerals :: NonNegative Int -> Bool
+prop_resolve_numerals (NonNegative n) = (Just . buildProgram $ churchNumeral n) == (resolve' emptyProgram $ show n)
 
 spec_resolveAll :: SpecWith ()
 spec_resolveAll = describe "resolveAll" $ do

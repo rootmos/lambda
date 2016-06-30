@@ -8,6 +8,7 @@ import Control.Monad.Writer
 import Data.List (find, intercalate)
 import Data.Lambda.Parser
 import Test.QuickCheck
+import Text.Read (readMaybe)
 
 data NodeLabel = Variable Name | Lambda Name | App | Root
     deriving (Show, Eq, Ord)
@@ -194,6 +195,9 @@ findRoot = get >>= return . maybeRoot >>= rootMaker
             return rootNode
 
 resolve' :: Program -> Name -> Maybe Expr
+resolve' _ numeral | nonNegativeString numeral = Just $ buildProgram $ churchNumeral (read numeral)
+    where
+        nonNegativeString s = (fmap (>= 0) $ (readMaybe s :: Maybe Int)) == Just True
 resolve' program name = do
     node <- resolve program name
     return $ Expr { exprProgram = program, exprNode = node }
