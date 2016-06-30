@@ -51,6 +51,9 @@ spec_doREPL = describe "doREPL" $ do
         it "(if false 1 2) should return 2" $ do
             output <- flip evalStateT baseProgram $ doREPL "(if false 1 2)"
             output `shouldBe` Just "2"
+        it "(plus 9 4) should return 13" $ do
+            output <- flip evalStateT baseProgram $ doREPL "(plus 9 4)"
+            output `shouldBe` Just "13"
 
 spec :: SpecWith ()
 spec = do

@@ -650,6 +650,21 @@ churchIf = def "if" =<< lambda "p" =<< lambda "a" =<< lambda "b" =<< do
                    arg <- variable "b"
                    app fun arg
 
+churchPlus :: Monad m => ProgramT m ProgramNode
+churchPlus = def "plus" =<< lambda "m" =<< lambda "n" =<< lambda "f" =<< lambda "x" =<< do
+    fun1 <- do
+        fun2 <- variable "m"
+        arg2 <- variable "f"
+        app fun2 arg2
+    arg1 <- do
+        fun2 <- do
+            fun3 <- variable "n"
+            arg3 <- variable "f"
+            app fun3 arg3
+        arg2 <- variable "x"
+        app fun2 arg2
+    app fun1 arg1
+
 churchNumeral :: Monad m => Int -> ProgramT m ProgramNode
 churchNumeral n = def (show n) =<< lambda "f" =<< lambda "x" =<< foldr (=<<) (variable "x") (replicate n (\arg -> do fun <- variable "f"; app fun arg))
 
@@ -657,4 +672,4 @@ identityFunction :: Monad m => ProgramT m ProgramNode
 identityFunction = def "id" =<< lambda "x" =<< variable "x"
 
 baseProgram :: Program
-baseProgram = exprProgram . buildProgram $ identityFunction >> churchTrue >> churchFalse >> churchIf
+baseProgram = exprProgram . buildProgram $ identityFunction >> churchTrue >> churchFalse >> churchIf >> churchPlus
