@@ -8,6 +8,7 @@ import Control.Monad.Writer
 import Data.List (find, intercalate)
 import Data.Lambda.Parser
 import Test.QuickCheck
+import Text.Read (readMaybe)
 
 data NodeLabel = Variable Name | Lambda Name | App | Root
     deriving (Show, Eq, Ord)
@@ -194,12 +195,51 @@ findRoot = get >>= return . maybeRoot >>= rootMaker
             return rootNode
 
 resolve' :: Program -> Name -> Maybe Expr
+resolve' _ numeral | nonNegativeString numeral = Just $ buildProgram $ churchNumeral (read numeral)
+    where
+        nonNegativeString s = (fmap (>= 0) $ (readMaybe s :: Maybe Int)) == Just True
 resolve' program name = do
     node <- resolve program name
     return $ Expr { exprProgram = program, exprNode = node }
 
 resolve :: Program -> Name -> Maybe ProgramNode
 resolve program name1 = snd <$> find (\(name2, _) -> name1 == name2) (definedExprs program)
+
+resolveAll :: Program -> Expr -> Expr
+resolveAll program expr = foldr tryResolveVariable expr (free' expr)
+    where
+        tryResolveVariable (_, Variable name) e = case resolve' program name of
+                                                    Just resolvedExpr -> simplify $ resolveAll program $ buildProgram $ do
+                                                        fun <- lambda name =<< copy' (exprProgram expr) (exprNode expr)
+                                                        arg <- copy' (exprProgram resolvedExpr) (exprNode resolvedExpr)
+                                                        app fun arg
+                                                    Nothing  -> e
+        tryResolveVariable _ _ = error "free' has returned a non-variable"
+
+isEquivalentToDefinition :: Program -> Expr -> Maybe Name
+isEquivalentToDefinition program expr = maybeChurchNumeral `mplus` maybeDefinition
+    where
+        maybeChurchNumeral = let p = exprProgram expr
+                              in case exprNode expr of
+                                   (n1, Lambda f) -> case body p n1 of
+                                                       (n2, Lambda x) -> case body p n2 of
+                                                                           (_, Variable x') | x == x' -> Just "0"
+                                                                           pn -> show <$> countApplications (1 :: Int) pn
+                                                           where
+                                                               countApplications current pn = case pn of
+                                                                                                (appNode, App) -> case function p appNode of
+                                                                                                                    (_, Variable f') | f == f' -> case argument p appNode of
+                                                                                                                                                    n @ (_, App) -> countApplications (current + 1) n
+                                                                                                                                                    (_, Variable x') | x == x' -> Just current
+                                                                                                                                                    _ ->  Nothing
+                                                                                                                    _ -> Nothing
+                                                                                                _ -> Nothing
+                                                       _ -> Nothing
+                                   _ -> Nothing
+        maybeDefinition = fmap fst $ find (\(_, x) -> alphaEquivalent expr x) theDefinedExprs
+        theDefinedExprs :: [(Name, Expr)]
+        theDefinedExprs = map exprifyer (definedExprs program)
+        exprifyer (name, node) = (name, Expr node program)
 
 definedAs :: Program -> ProgramNode -> Maybe Name
 definedAs program n1 = fst <$> find (\(_, n2) -> n1 == n2) (definedExprs program)
@@ -610,8 +650,26 @@ churchIf = def "if" =<< lambda "p" =<< lambda "a" =<< lambda "b" =<< do
                    arg <- variable "b"
                    app fun arg
 
+churchPlus :: Monad m => ProgramT m ProgramNode
+churchPlus = def "plus" =<< lambda "m" =<< lambda "n" =<< lambda "f" =<< lambda "x" =<< do
+    fun1 <- do
+        fun2 <- variable "m"
+        arg2 <- variable "f"
+        app fun2 arg2
+    arg1 <- do
+        fun2 <- do
+            fun3 <- variable "n"
+            arg3 <- variable "f"
+            app fun3 arg3
+        arg2 <- variable "x"
+        app fun2 arg2
+    app fun1 arg1
+
 churchNumeral :: Monad m => Int -> ProgramT m ProgramNode
 churchNumeral n = def (show n) =<< lambda "f" =<< lambda "x" =<< foldr (=<<) (variable "x") (replicate n (\arg -> do fun <- variable "f"; app fun arg))
 
+identityFunction :: Monad m => ProgramT m ProgramNode
+identityFunction = def "id" =<< lambda "x" =<< variable "x"
+
 baseProgram :: Program
-baseProgram = exprProgram . buildProgram $ churchTrue >> churchFalse >> churchIf >> churchNumeral 0 >> churchNumeral 1 >> churchNumeral 2 >> churchNumeral 3
+baseProgram = exprProgram . buildProgram $ identityFunction >> churchTrue >> churchFalse >> churchIf >> churchPlus

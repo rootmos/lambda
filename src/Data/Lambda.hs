@@ -5,9 +5,11 @@ module Data.Lambda ( Expr
                    , fromAST
                    , simplify
                    , resolve'
+                   , resolveAll
                    , empty
                    , baseProgram
                    , append
+                   , isEquivalentToDefinition
                    ) where
 
 import Data.Lambda.Internal

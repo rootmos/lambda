@@ -166,6 +166,33 @@ spec_resolve = describe "reslove" $ do
             _ <- def "foo" =<< variable "y"
             def "foo" =<< variable "x"
         (resolve (exprProgram expr) "foo") `shouldBe` Just (exprNode expr)
+    it "should resolve numbers to Church numerals" $ property $ prop_resolve_numerals
+        where
+            prop_resolve_numerals (NonNegative n) = (Just . buildProgram $ churchNumeral n) == (resolve' emptyProgram $ show n)
+
+spec_resolveAll :: SpecWith ()
+spec_resolveAll = describe "resolveAll" $ do
+    it "should resolve a free variable with a defined one" $ do
+        expr <- buildProgramT $ (def "foo" =<< variable "x") >> variable "foo"
+        expected <- buildProgramT $ (def "foo" =<< variable "x") >> variable "x"
+        (resolveAll (exprProgram expr) expr) `shouldBe` expected
+
+spec_isEquivalentToDefinition :: SpecWith ()
+spec_isEquivalentToDefinition = describe "isEquivalentToDefinition" $ do
+    it "should find defined expression if equivalent" $ do
+        expr <- buildProgramT $ def "foo" =<< lambda "x" =<< variable "x"
+        x <- buildProgramT $ lambda "y" =<< variable "y"
+        (isEquivalentToDefinition (exprProgram expr) x) `shouldBe` Just "foo"
+    it "should find nothing for non-defined expressions" $ do
+        expr <- buildProgramT $ def "foo" =<< lambda "x" =<< variable "x"
+        x <- buildProgramT $ lambda "y" =<< variable "z"
+        (isEquivalentToDefinition (exprProgram expr) x) `shouldBe` Nothing
+    it "should find the numeral for Church numerals" $ property $ prop_reversly_resolve_numerals
+        where
+            prop_reversly_resolve_numerals (NonNegative n) = (isEquivalentToDefinition emptyProgram numeral) == (Just . show $ n)
+                where
+                    numeral = buildProgram $ churchNumeral n
+
 
 spec_definedAs :: SpecWith ()
 spec_definedAs = describe "definedAs" $ do
@@ -1064,6 +1091,8 @@ spec = do
     spec_app
     spec_def
     spec_resolve
+    spec_resolveAll
+    spec_isEquivalentToDefinition 
     spec_definedAs
     spec_parent
     spec_parents
@@ -1074,7 +1103,7 @@ spec = do
     spec_substitute
     spec_Expr_Show_instance
     spec_Expr_Eq_instance
-    spec_Program_Show_instance 
+    spec_Program_Show_instance
     spec_copy
     spec_betaReduce
     spec_etaReduce
