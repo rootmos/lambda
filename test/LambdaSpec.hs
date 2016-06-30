@@ -167,10 +167,8 @@ spec_resolve = describe "reslove" $ do
             def "foo" =<< variable "x"
         (resolve (exprProgram expr) "foo") `shouldBe` Just (exprNode expr)
     it "should resolve numbers to Church numerals" $ property $ prop_resolve_numerals
-
-
-prop_resolve_numerals :: NonNegative Int -> Bool
-prop_resolve_numerals (NonNegative n) = (Just . buildProgram $ churchNumeral n) == (resolve' emptyProgram $ show n)
+        where
+            prop_resolve_numerals (NonNegative n) = (Just . buildProgram $ churchNumeral n) == (resolve' emptyProgram $ show n)
 
 spec_resolveAll :: SpecWith ()
 spec_resolveAll = describe "resolveAll" $ do
@@ -179,6 +177,16 @@ spec_resolveAll = describe "resolveAll" $ do
         expected <- buildProgramT $ (def "foo" =<< variable "x") >> variable "x"
         (resolveAll (exprProgram expr) expr) `shouldBe` expected
 
+spec_isEquivalentToDefinition :: SpecWith ()
+spec_isEquivalentToDefinition = describe "isEquivalentToDefinition" $ do
+    it "should find defined expression if equivalent" $ do
+        expr <- buildProgramT $ def "foo" =<< lambda "x" =<< variable "x"
+        x <- buildProgramT $ lambda "y" =<< variable "y"
+        (isEquivalentToDefinition (exprProgram expr) x) `shouldBe` Just "foo"
+    it "should find nothing for non-defined expressions" $ do
+        expr <- buildProgramT $ def "foo" =<< lambda "x" =<< variable "x"
+        x <- buildProgramT $ lambda "y" =<< variable "z"
+        (isEquivalentToDefinition (exprProgram expr) x) `shouldBe` Nothing
 
 spec_definedAs :: SpecWith ()
 spec_definedAs = describe "definedAs" $ do
@@ -1078,6 +1086,7 @@ spec = do
     spec_def
     spec_resolve
     spec_resolveAll
+    spec_isEquivalentToDefinition 
     spec_definedAs
     spec_parent
     spec_parents
