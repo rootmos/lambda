@@ -217,8 +217,26 @@ resolveAll program expr = foldr tryResolveVariable expr (free' expr)
         tryResolveVariable _ _ = error "free' has returned a non-variable"
 
 isEquivalentToDefinition :: Program -> Expr -> Maybe Name
-isEquivalentToDefinition program expr = fmap fst $ find (\(_, x) -> alphaEquivalent expr x) theDefinedExprs
+isEquivalentToDefinition program expr = maybeChurchNumeral `mplus` maybeDefinition
     where
+        maybeChurchNumeral = let p = exprProgram expr
+                              in case exprNode expr of
+                                   (n1, Lambda f) -> case body p n1 of
+                                                       (n2, Lambda x) -> case body p n2 of
+                                                                           (_, Variable x') | x == x' -> Just "0"
+                                                                           pn -> show <$> countApplications (1 :: Int) pn
+                                                           where
+                                                               countApplications current pn = case pn of
+                                                                                                (appNode, App) -> case function p appNode of
+                                                                                                                    (_, Variable f') | f == f' -> case argument p appNode of
+                                                                                                                                                    n @ (_, App) -> countApplications (current + 1) n
+                                                                                                                                                    (_, Variable x') | x == x' -> Just current
+                                                                                                                                                    _ ->  Nothing
+                                                                                                                    _ -> Nothing
+                                                                                                _ -> Nothing
+                                                       _ -> Nothing
+                                   _ -> Nothing
+        maybeDefinition = fmap fst $ find (\(_, x) -> alphaEquivalent expr x) theDefinedExprs
         theDefinedExprs :: [(Name, Expr)]
         theDefinedExprs = map exprifyer (definedExprs program)
         exprifyer (name, node) = (name, Expr node program)
@@ -639,4 +657,4 @@ identityFunction :: Monad m => ProgramT m ProgramNode
 identityFunction = def "id" =<< lambda "x" =<< variable "x"
 
 baseProgram :: Program
-baseProgram = exprProgram . buildProgram $ identityFunction >> churchTrue >> churchFalse >> churchIf >> churchNumeral 0 >> churchNumeral 1 >> churchNumeral 2 >> churchNumeral 3
+baseProgram = exprProgram . buildProgram $ identityFunction >> churchTrue >> churchFalse >> churchIf
