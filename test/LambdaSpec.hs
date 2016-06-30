@@ -187,6 +187,12 @@ spec_isEquivalentToDefinition = describe "isEquivalentToDefinition" $ do
         expr <- buildProgramT $ def "foo" =<< lambda "x" =<< variable "x"
         x <- buildProgramT $ lambda "y" =<< variable "z"
         (isEquivalentToDefinition (exprProgram expr) x) `shouldBe` Nothing
+    it "should find the numeral for Church numerals" $ property $ prop_reversly_resolve_numerals
+        where
+            prop_reversly_resolve_numerals (NonNegative n) = (isEquivalentToDefinition emptyProgram numeral) == (Just . show $ n)
+                where
+                    numeral = buildProgram $ churchNumeral n
+
 
 spec_definedAs :: SpecWith ()
 spec_definedAs = describe "definedAs" $ do
