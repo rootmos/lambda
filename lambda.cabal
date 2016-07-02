@@ -1,11 +1,12 @@
 name:             lambda
-version:          0.0.0
+version:          0.1.0.0
 license:          GPL
 license-file:     LICENSE
 copyright:        (c) 2016 Gustav Behm
 author:           Gustav Behm <gustav.behm@gmail.com>
 build-type:       Simple
-cabal-version:    >= 1.8
+cabal-version:    >= 1.10
+homepage:         https://github.com/rootmos/lambda#readme
 
 library
   exposed-modules: Data.Lambda, Data.Lambda.Parser, Data.Lambda.REPL
@@ -13,12 +14,14 @@ library
   ghc-options: -Wall
   hs-source-dirs: src
   build-depends: base, fgl, mtl, transformers, parsec, QuickCheck, readline
+  default-language: Haskell2010
 
 executable lambda
   main-is: Main.hs
   ghc-options: -Wall
   build-depends: base, lambda
   hs-source-dirs: repl
+  default-language: Haskell2010
 
 test-suite spec
   type: exitcode-stdio-1.0
@@ -26,3 +29,8 @@ test-suite spec
   hs-source-dirs: test, src
   main-is: Spec.hs
   build-depends: base, fgl, mtl, transformers, lambda, hspec, QuickCheck, parsec, readline
+  default-language: Haskell2010
+
+source-repository head
+  type:     git
+  location: https://github.com/rootmos/lambda

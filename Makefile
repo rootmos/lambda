@@ -1,7 +1,7 @@
 .PHONY: run
 run:
-	cabal run
+	stack exec lambda
 
 .PHONY: test
 test:
-	cabal test --show-details=always --test-option=--color
+	stack test

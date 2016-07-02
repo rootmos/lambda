@@ -690,12 +690,12 @@ spec_substitute = describe "substitute" $ do
         lhs <- buildProgramT $ do
             l <- lambda "y" =<< variable "x"
             let nM = do
-                fun <- variable "u"
-                arg <- do
-                    w <- variable "w"
-                    y <- variable "y"
-                    app w y
-                app fun arg
+                    fun <- variable "u"
+                    arg <- do
+                        w <- variable "w"
+                        y <- variable "y"
+                        app w y
+                    app fun arg
             l `substitute` ("x" `with` nM)
         rhs <- buildProgramT $ do
             lambda "z" =<< do
@@ -995,12 +995,12 @@ spec_simplify = describe "simplify" $ do
     it "should not apply beta reduce when it becomes more complex: ((λx.(x x) x) (λx.(x x) x)) should not be simplified" $ do
         complexExpression <- buildProgramT $ do
             let innerExpressionM = lambda "x" =<< do
-                fun1 <- do
-                    fun2 <- variable "x"
-                    arg2 <- variable "x"
-                    app fun2 arg2
-                arg1 <- variable "x"
-                app fun1 arg1
+                                                fun1 <- do
+                                                    fun2 <- variable "x"
+                                                    arg2 <- variable "x"
+                                                    app fun2 arg2
+                                                arg1 <- variable "x"
+                                                app fun1 arg1
 
             innerExpression1 <- innerExpressionM
             innerExpression2 <- innerExpressionM
